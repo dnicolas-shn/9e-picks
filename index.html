@@ -7,9 +7,6 @@
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; }
   .header-container { display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #ddd; padding-bottom: 15px; margin-bottom: 15px; }
-  .top-row { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
-  .toggle-past-btn { padding: 8px 16px; border: 1px solid #94a3b8; background: white; color: #475569; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; display: flex; align-items: center; gap: 6px; }
-  .rules-btn { padding: 8px 16px; border: 1px solid #cbd5e1; background: white; color: #334155; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .name-bar { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; margin-bottom:15px; }
   .name-btn { padding:8px 14px; border:1px solid #ccc; border-radius:20px; background:white; color: #334155; cursor:pointer; transition: 0.2s; font-weight: 500; }
   .name-btn.completed { background: #fef08a; color: #713f12; border-color: #eab308; font-weight: 700; }
@@ -25,6 +22,7 @@
   .slot { border:1px solid #eee; padding:6px; background:#f8f9fa; margin-bottom:5px; border-radius:4px; cursor:pointer; font-size:12px; transition: 0.2s; }
   .slot.filled { background:#cbd5e1; color:#334155; border-color:#94a3b8; cursor:not-allowed; }
   .slot.filled.mine { background:#007bff; color:white; border-color:#0056b3; }
+  .slot.hover-focus { transform: scale(1.05); z-index: 5; font-weight: 700; }
   .slot.hover-focus-day { background: #fef08a !important; color: #854d0e !important; }
   .slot.hover-focus-night { background: #d8b4fe !important; color: #581c87 !important; }
   .slot.hover-focus-charge { background: #facc15 !important; color: #713f12 !important; }
@@ -41,7 +39,7 @@
 
 <div class="header-container">
   <div class="top-row">
-    <button class="rules-btn" onclick="openRules()">📖 Rules & Guidelines</button>
+    <button class="name-btn" style="font-size: 11px;" onclick="location.reload()">🔄 Force Sync Sheet</button>
   </div>
 </div>
 
@@ -51,46 +49,34 @@
 
 <div class="user-status-card" id="userStatusCard">
   <div class="user-header-row">
-    <div class="user-info">Logged in: <span id="currentUserName" style="color:#007bff;"></span></div>
-    <button class="logout-btn" onclick="logout()">Sign Out</button>
+    <div class="user-info">Logged In: <span id="currentUserName" style="color:#007bff;"></span></div>
+    <button class="logout-btn" onclick="logout()" style="cursor:pointer; background:#fee2e2; border:1px solid #fecaca; padding:4px 8px; border-radius:4px; font-size:11px; color:#991b1b;">Logout</button>
   </div>
   <div class="stats-bar" id="statsBar"></div>
 </div>
 
-<h2 id="headerTitle" class="section-header">Loading Schedule...</h2>
+<h2 id="headerTitle" class="section-header">Detecting Sheet Headers...</h2>
 <div class="calendar-wrapper"><div class="calendar" id="calendar"></div></div>
 
 <div class="toast" id="toast"></div>
 
 <div id="authModal" class="modal" onclick="cancelAuth()">
   <div class="modal-box" onclick="event.stopPropagation()">
-    <div class="modal-title" id="authTitle">Security Login</div>
-    <input id="nameInput" placeholder="Enter Name">
+    <div id="authTitle" style="text-align:center; font-weight:800; color:#1e293b; font-size: 1.2rem;">Verification</div>
+    <input id="nameInput" placeholder="Enter Name Exactly" style="display:none;">
     <div class="pin-boxes">
-      <input maxlength="1" inputmode="numeric" data-index="0">
-      <input maxlength="1" inputmode="numeric" data-index="1">
-      <input maxlength="1" inputmode="numeric" data-index="2">
-      <input maxlength="1" inputmode="numeric" data-index="3">
+      <input maxlength="1" inputmode="numeric">
+      <input maxlength="1" inputmode="numeric">
+      <input maxlength="1" inputmode="numeric">
+      <input maxlength="1" inputmode="numeric">
     </div>
-  </div>
-</div>
-
-<div id="rulesModal" class="modal" onclick="closeRules()">
-  <div class="modal-box rules-box" onclick="event.stopPropagation()">
-    <div class="modal-title">Rules & Guidelines</div>
-    <div class="rules-content">
-      <h4>🎯 Pick Limits: Max 20 shifts total.</h4>
-      <ul><li>Standard nursing unit rules apply.</li></ul>
-    </div>
-    <button class="name-btn" style="width:100%; margin-top:20px;" onclick="closeRules()">Got it</button>
   </div>
 </div>
 
 <script>
-const STEIN_URL = 'https://api.steinhq.com/v1/storages/69db1f5ebb16885eb7bd2289';
-const SLOTS=["Charge","Day","Day","Day","Night","Night"];
-const daysArr=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-const monthArr=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+// --- CONFIG ---
+const STEIN_URL = 'https://api.steinhq.com/v1/storages/69db1f5ebb16885eb7bd2289'; 
+const SLOTS = ["Charge", "Day", "Day", "Day", "Night", "Night"];
 
 let currentUser = null;
 let staffList = [];
@@ -107,6 +93,25 @@ const toast = m => {
   setTimeout(() => t.classList.remove("show"), 2500);
 };
 
+// --- HEADER ENFORCER LOGIC ---
+// This ensures that even if headers are renamed, the app finds the right data.
+function normalizeData(array, mapping) {
+  if (!array || array.length === 0) return [];
+  return array.map(row => {
+    let newRow = {};
+    for (let internalKey in mapping) {
+      const possibleNames = mapping[internalKey];
+      // Find which key in the row matches our list of possible header names
+      const foundKey = Object.keys(row).find(k => 
+        possibleNames.includes(k.toLowerCase().trim())
+      );
+      newRow[internalKey] = foundKey ? row[foundKey] : null;
+    }
+    return newRow;
+  });
+}
+
+// --- DATA INIT ---
 async function init() {
   try {
     const [optRes, staffRes, shiftRes] = await Promise.all([
@@ -114,33 +119,124 @@ async function init() {
       fetch(`${STEIN_URL}/Names`),
       fetch(`${STEIN_URL}/Shifts`)
     ]);
-    const opts = await optRes.json();
-    optStartDate = opts[0].startDate || opts[0].Value;
-    optDays = parseInt(opts[0].days || opts[0]["Period (Days)"] || 42);
-    staffList = await staffRes.json();
-    allShiftsData = await shiftRes.json();
-    renderApp();
+
+    const optsRaw = await optRes.json();
+    const staffRaw = await staffRes.json();
+    const shiftRaw = await shiftRes.json();
+
+    // Enforce Options Headers
+    const cleanOpts = normalizeData(optsRaw, {
+      start: ['startdate', 'start', 'value', 'date'],
+      days: ['days', 'period', 'period (days)', 'length']
+    });
+    optStartDate = cleanOpts[0].start;
+    optDays = parseInt(cleanOpts[0].days || 42);
+
+    // Enforce Staff Headers
+    staffList = normalizeData(staffRaw, {
+      name: ['name', 'staff', 'full name', 'nurse'],
+      code: ['code', 'pin', 'pass', 'password', 'secret'],
+      active: ['active', 'status', 'approved', 'enabled']
+    });
+
+    // Enforce Shift Headers
+    allShiftsData = normalizeData(shiftRaw, {
+      date: ['date', 'day'],
+      slotId: ['slotid', 'id', 'positionid'],
+      slotName: ['slotname', 'slot', 'type'],
+      name: ['name', 'staff', 'owner']
+    });
+
+    document.getElementById("headerTitle").textContent = `Unit Schedule: ${optStartDate}`;
+    renderNames();
+    buildCalendar();
+    
+    allShiftsData.forEach(s => {
+      if(s.date && s.slotId) applyUI(s.date, s.slotId, s.slotName, s.name, true, true);
+    });
   } catch (e) {
-    toast("Error loading data.");
+    toast("Check Google Sheet Tabs/Headers.");
+    console.error(e);
   }
 }
 
-function renderApp() {
+function buildCalendar() {
+  const container = document.getElementById("calendar");
+  container.innerHTML = "";
   const start = new Date(optStartDate.replace(/-/g,'/'));
-  document.getElementById("headerTitle").textContent = `Schedule: ${monthArr[start.getMonth()]} ${start.getDate()}`;
-  buildDaysGrid(start, optDays, document.getElementById("calendar"));
-  renderNameButtons();
-  allShiftsData.forEach(r => applyUI(r.date, r.slotId, r.slotName, r.name, true, true));
+  
+  for (let i = 0; i < optDays; i++) {
+    const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const ds = dt.toISOString().split('T')[0];
+    const cell = document.createElement("div");
+    cell.className = "day";
+    cell.innerHTML = `<div class="date-title">${dt.toDateString().slice(0,10)}</div>`;
+    
+    SLOTS.forEach((sn, idx) => {
+      const el = document.createElement("div");
+      el.className = "slot";
+      el.textContent = sn;
+      Object.assign(el.dataset, {date: ds, slotId: `${sn}-${idx}`, slotName: sn, owner: ""});
+      el.ondblclick = () => handleToggle(el);
+      cell.appendChild(el);
+    });
+    container.appendChild(cell);
+  }
+}
+
+async function handleToggle(el) {
+  if (!currentUser) return toast("Login Required");
+  if (userActiveStatus[currentUser] === false) return toast("Pending Admin Approval.");
+  
+  const ds = el.dataset.date, id = el.dataset.slotId, sn = el.dataset.slotName;
+  
+  if (el.dataset.owner === currentUser) {
+    applyUI(ds, id, sn, currentUser, false);
+    allShiftsData = allShiftsData.filter(s => !(s.date === ds && s.slotId === id));
+    await fetch(`${STEIN_URL}/Shifts`, {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ condition: { date: ds, slotId: id, name: currentUser } })
+    });
+  } else if (el.dataset.owner === "") {
+    if (allShiftsData.filter(s => s.name === currentUser).length >= 20) return toast("Max 20 shifts allowed.");
+    
+    applyUI(ds, id, sn, currentUser, true);
+    const newShift = { date: ds, slotId: id, slotName: sn, name: currentUser };
+    allShiftsData.push(newShift);
+    await fetch(`${STEIN_URL}/Shifts`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify([newShift])
+    });
+  }
+}
+
+function applyUI(ds, id, sn, name, isAdding, pass) {
+  const el = document.querySelector(`.slot[data-date="${ds}"][data-slot-id="${id}"]`);
+  if (!el) return;
+  if (isAdding) {
+    el.textContent = `${sn}: ${name}`;
+    el.classList.add("filled");
+    el.dataset.owner = name;
+    if (name === currentUser) el.classList.add("mine");
+  } else {
+    el.textContent = sn;
+    el.classList.remove("filled", "mine");
+    el.dataset.owner = "";
+  }
   refreshNameCounts();
 }
 
-function renderNameButtons() {
+// --- AUTH & REGISTER ---
+function renderNames() {
   const b = document.getElementById("nameBar");
   const regBtn = b.querySelector('.register');
   b.innerHTML = "";
   b.appendChild(regBtn);
-  staffList.sort((a,b) => a.name.localeCompare(b.name)).forEach(u => {
-    userActiveStatus[u.name] = (u.active === "TRUE" || u.active === true);
+  
+  staffList.forEach(u => {
+    userActiveStatus[u.name] = (String(u.active).toUpperCase() === "TRUE" || u.active === true);
     const btn = document.createElement("button");
     btn.className="name-btn";
     btn.dataset.name = u.name;
@@ -152,55 +248,6 @@ function renderNameButtons() {
   });
 }
 
-function buildDaysGrid(start, count, container) {
-  container.innerHTML = "";
-  for (let i = 0; i < count; i++) {
-    const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
-    const ds = dt.toISOString().split('T')[0];
-    const cell = document.createElement("div");
-    cell.className = "day";
-    cell.innerHTML = `<div class="date-title">${daysArr[dt.getDay()]}, ${monthArr[dt.getMonth()]} ${dt.getDate()}</div>`;
-    SLOTS.forEach((sn, idx) => {
-      const el = document.createElement("div");
-      el.className = "slot";
-      el.textContent = sn;
-      Object.assign(el.dataset, {date: ds, slotId: sn+"-"+idx, slotName: sn, owner: ""});
-      el.ondblclick = () => handleToggle(el);
-      cell.appendChild(el);
-    });
-    container.appendChild(cell);
-  }
-}
-
-async function handleToggle(el) {
-  if (!currentUser) return toast("Login required");
-  if (!userActiveStatus[currentUser]) return toast("Awaiting approval.");
-  const ds = el.dataset.date, sn = el.dataset.slotName, id = el.dataset.slotId;
-  if (el.dataset.owner === currentUser) {
-    applyUI(ds, id, sn, currentUser, false);
-    await fetch(`${STEIN_URL}/Shifts`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ condition: { date: ds, slotId: id, name: currentUser } }) });
-  } else if (el.dataset.owner === "") {
-    if (allShiftsData.filter(s => s.name === currentUser).length >= 20) return toast("Max 20 shifts.");
-    applyUI(ds, id, sn, currentUser, true);
-    const newShift = { date: ds, slotId: id, slotName: sn, name: currentUser };
-    allShiftsData.push(newShift);
-    await fetch(`${STEIN_URL}/Shifts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([newShift]) });
-  }
-}
-
-function applyUI(ds, id, sn, name, add, pass) {
-  const el = document.querySelector(`.slot[data-date="${ds}"][data-slot-id="${id}"]`);
-  if (!el) return;
-  if (add) {
-    el.textContent = sn + ": " + name; el.classList.add("filled"); el.dataset.owner = name;
-    if (name === currentUser) el.classList.add("mine");
-  } else {
-    el.textContent = sn; el.classList.remove("filled", "mine"); el.dataset.owner = "";
-  }
-  refreshNameCounts();
-}
-
-// --- AUTH ---
 function openLogin(name) {
   authMode = "login";
   activeLoginName = name;
@@ -212,7 +259,7 @@ function openLogin(name) {
 
 function openRegister() {
   authMode = "register";
-  document.getElementById("authTitle").textContent = "New User";
+  document.getElementById("authTitle").textContent = "Register Staff";
   document.getElementById("nameInput").style.display = "block";
   document.getElementById("nameInput").value = "";
   document.getElementById("authModal").style.display = "flex";
@@ -221,36 +268,48 @@ function openRegister() {
 
 async function checkPin() {
   const pin = Array.from(document.querySelectorAll(".pin-boxes input")).map(i => i.value).join("");
+  if (pin.length < 4) return;
+
   if (authMode === "register") {
     const name = document.getElementById("nameInput").value.trim();
-    if (!name || pin.length < 4) return toast("Enter name and 4-digit PIN");
+    if (!name) return toast("Enter Full Name");
+    // Registration always sends lowercase keys for sheet safety
     const newUser = { name: name, code: pin, active: "FALSE" };
-    await fetch(`${STEIN_URL}/Names`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([newUser]) });
-    toast("Registered! Awaiting approval.");
-    location.reload();
+    await fetch(`${STEIN_URL}/Names`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([newUser])
+    });
+    toast("Registered. Ask Admin to check Active box.");
+    setTimeout(() => location.reload(), 2000);
   } else {
-    const user = staffList.find(r => r.name === activeLoginName && String(r.code) === pin);
+    const user = staffList.find(u => u.name === activeLoginName && String(u.code) === pin);
     if (user) {
-      currentUser = user.name;
+      currentUser = activeLoginName;
       document.getElementById("authModal").style.display = "none";
       document.getElementById("nameBar").style.display = "none";
       document.getElementById("userStatusCard").style.display = "block";
       document.getElementById("currentUserName").textContent = currentUser;
-      toast("Logged in.");
-    } else { toast("Wrong PIN"); clearPin(); }
+      document.querySelectorAll('.slot.filled').forEach(el => {
+        if(el.dataset.owner === currentUser) el.classList.add("mine");
+      });
+      toast(`Signed in: ${currentUser}`);
+    } else {
+      toast("Invalid PIN");
+      clearPin();
+    }
   }
 }
 
 const pinInputs = document.querySelectorAll(".pin-boxes input");
 pinInputs.forEach((inp, idx) => {
   inp.addEventListener("input", () => { if (inp.value && idx < 3) pinInputs[idx + 1].focus(); if (idx === 3) checkPin(); });
+  inp.addEventListener("keydown", (e) => { if (e.key === "Backspace" && !inp.value && idx > 0) pinInputs[idx - 1].focus(); });
 });
 
 function clearPin() { pinInputs.forEach(i => i.value = ""); pinInputs[0].focus(); }
 function logout() { location.reload(); }
 function cancelAuth() { document.getElementById("authModal").style.display = "none"; }
-function openRules() { document.getElementById("rulesModal").style.display = "flex"; }
-function closeRules() { document.getElementById("rulesModal").style.display = "none"; }
 function handleHover(name, isH) {
   document.querySelectorAll(`.slot.filled[data-owner="${name}"]`).forEach(el => {
     if (isH) {
@@ -262,11 +321,15 @@ function handleHover(name, isH) {
     } else { el.classList.remove('hover-focus', 'hover-focus-day', 'hover-focus-night', 'hover-focus-charge'); }
   });
 }
+
 function refreshNameCounts() {
   const counts = {};
-  document.querySelectorAll('.slot.filled').forEach(el => { counts[el.dataset.owner] = (counts[el.dataset.owner] || 0) + 1; });
-  document.querySelectorAll('.name-btn').forEach(btn => {
-    const n = btn.dataset.name; if (!n) return;
+  document.querySelectorAll('.slot.filled').forEach(el => { 
+    const owner = el.dataset.owner;
+    counts[owner] = (counts[owner] || 0) + 1; 
+  });
+  document.querySelectorAll('.name-btn:not(.register)').forEach(btn => {
+    const n = btn.dataset.name;
     const c = counts[n] || 0;
     btn.textContent = `${n} (${c}/20)`;
     if (c >= 20) btn.classList.add('completed');
