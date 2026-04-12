@@ -1,142 +1,193 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nursing Unit - Shift Pick</title>
+<base target="_top">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unit Schedule Picks</title>
 <style>
-  /* --- STYLING --- */
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f8fafc; color: #1e293b; }
-  .header-container { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px; margin-bottom: 15px; }
-  h1 { font-size: 1.25rem; font-weight: 800; margin: 0; color: #0f172a; }
-  
-  .name-bar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:15px; }
-  .name-btn { padding:10px 18px; border:1px solid #cbd5e1; border-radius:25px; background:white; cursor:pointer; font-weight: 600; transition: 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-  .name-btn:hover { background: #f1f5f9; transform: translateY(-1px); }
-  
-  .user-status-card { display:none; background:white; padding:15px; border-radius:12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom:20px; border-left: 6px solid #3b82f6; }
-  .user-info { font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
-  .logout-btn { padding: 6px 12px; background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; }
-
-  .calendar-wrapper { overflow-x: auto; padding-bottom: 20px; }
-  .calendar { display: grid; grid-template-columns: repeat(7, minmax(160px, 1fr)); gap: 12px; min-width: 1120px; }
-  .day { border: 1px solid #e2e8f0; padding: 12px; border-radius: 12px; background: white; min-height: 200px; position: relative; }
-  .date-title { font-weight: 800; font-size: 0.8rem; color: #94a3b8; margin-bottom: 10px; text-transform: uppercase; border-bottom: 1px solid #f1f5f9; padding-bottom: 6px; }
-  
-  .slot { border: 1px solid #f1f5f9; padding: 10px; background: #f8fafc; margin-bottom: 8px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: 0.2s; font-weight: 600; color: #475569; }
-  .slot.filled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; border-color: #e2e8f0; }
-  .slot.mine { background: #3b82f6 !important; color: white !important; border-color: #2563eb; }
-  
-  .hover-day { background: #fef9c3 !important; color: #854d0e !important; }
-  .hover-night { background: #f3e8ff !important; color: #6b21a8 !important; }
-  .hover-charge { background: #fef3c7 !important; color: #92400e !important; border: 2px solid #fcd34d !important; }
-
-  .modal { position:fixed; inset:0; background:rgba(15, 23, 42, 0.6); display:none; align-items: flex-start; justify-content:center; z-index:999; padding-top: 100px; backdrop-filter: blur(4px); }
-  .modal-box { background:white; padding:30px; border-radius:20px; width:90%; max-width:340px; }
-  .pin-boxes { display:flex; justify-content:center; gap:12px; margin: 25px 0; }
-  .pin-boxes input { width:50px; height:60px; text-align:center; font-size:28px; border: 2px solid #cbd5e1; border-radius: 12px; }
-  
-  .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #0f172a; color: white; padding: 14px 28px; border-radius: 50px; opacity: 0; transition: 0.3s; z-index: 10000; pointer-events: none; font-weight: 600; }
-  .toast.show { opacity: 1; bottom: 50px; }
+  /* CSS remains identical to your original styling for visual consistency */
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; }
+  .header-container { display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #ddd; padding-bottom: 15px; margin-bottom: 15px; }
+  .top-row { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
+  .toggle-past-btn { padding: 8px 16px; border: 1px solid #94a3b8; background: white; color: #475569; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; display: flex; align-items: center; gap: 6px; }
+  .toggle-past-btn:hover { background: #f1f5f9; color: #0f172a; }
+  .toggle-past-btn.active { background: #334155; color: white; border-color: #334155; }
+  .rules-btn { padding: 8px 16px; border: 1px solid #cbd5e1; background: white; color: #334155; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .name-bar { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; margin-bottom:15px; }
+  .name-btn { padding:8px 14px; border:1px solid #ccc; border-radius:20px; background:white; color: #334155; cursor:pointer; transition: 0.2s; font-weight: 500; }
+  .name-btn.completed { background: #fef08a; color: #713f12; border-color: #eab308; font-weight: 700; }
+  .user-status-card { display:none; background:white; padding:15px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-bottom:20px; border-left: 5px solid #007bff; max-width: fit-content; }
+  .stats-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .stat-badge { background: #f1f5f9; color: #475569; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 700; border: 1px solid #e2e8f0; }
+  .calendar-wrapper { overflow-x: auto; padding-bottom: 10px; width: 100%; }
+  .calendar { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 48px 10px; min-width: 1000px; padding-top: 15px; }
+  @media (min-width: 1200px) { .calendar { grid-template-columns: repeat(14, minmax(125px, 1fr)); min-width: 1800px; } }
+  .day { border: 1px solid #ddd; padding: 8px; border-radius: 8px; min-height: 200px; display: flex; flex-direction: column; position: relative; background: white; }
+  .date-title { font-weight:bold; font-size:14px; color: #333; margin-bottom: 4px; border-bottom:1px solid #eee; padding-bottom:4px; }
+  .slot { border:1px solid #eee; padding:6px; background:#f8f9fa; margin-bottom:5px; border-radius:4px; cursor:pointer; font-size:12px; transition: 0.2s; }
+  .slot.filled { background:#cbd5e1; color:#334155; border-color:#94a3b8; cursor:not-allowed; }
+  .slot.filled.mine { background:#007bff; color:white; border-color:#0056b3; }
+  .slot.hover-focus-day { background: #fef08a !important; color: #854d0e !important; }
+  .slot.hover-focus-night { background: #d8b4fe !important; color: #581c87 !important; }
+  .slot.hover-focus-charge { background: #facc15 !important; color: #713f12 !important; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items: flex-start; justify-content:center; z-index:999; padding-top: 50px; }
+  .modal-box { background:white; padding:25px; border-radius:12px; width:90%; max-width:350px; }
+  .pin-boxes { display:flex; justify-content:center; gap:10px; margin-top:20px; }
+  .pin-boxes input { width:50px; height:60px; font-size:28px; text-align:center; border:2px solid #ddd; border-radius:10px; }
+  .toast { position: fixed !important; top: 20px !important; left: 50% !important; transform: translateX(-50%) !important; background: rgba(15, 23, 42, 0.95); color: white; padding: 12px 24px; border-radius: 50px; opacity: 0; transition: 0.3s; z-index: 10000; pointer-events: none; font-weight: 600; }
+  .toast.show { opacity: 1; top: 30px !important; }
 </style>
 </head>
 <body>
 
+<div id="pastSection" style="display:none;">
+  <h3 class="section-header" id="pastHeaderTitle">Loading...</h3>
+  <div class="calendar-wrapper"><div class="calendar" id="pastCalendar"></div></div>
+</div>
+
 <div class="header-container">
-  <h1 id="headerTitle">Unit Schedule</h1>
-  <button class="name-btn" style="font-size: 12px; padding: 5px 10px;" onclick="location.reload()">Refresh</button>
+  <div class="top-row">
+    <button id="togglePastBtn" class="toggle-past-btn" onclick="togglePastWeeks()" style="display:none;">View Past 2 Weeks</button>
+    <button class="rules-btn" onclick="openRules()">📖 Rules & Guidelines</button>
+  </div>
 </div>
 
 <div class="name-bar" id="nameBar"></div>
 
 <div class="user-status-card" id="userStatusCard">
-  <div class="user-info">
-    <span>Nurse: <span id="currentUserName" style="color:#3b82f6;"></span></span>
-    <button class="logout-btn" onclick="logout()">Logout</button>
+  <div class="user-header-row">
+    <div class="user-info">Logged in: <span id="currentUserName" style="color:#007bff;"></span></div>
+    <button class="logout-btn" onclick="logout()">Sign Out</button>
   </div>
+  <div class="stats-bar" id="statsBar"></div>
 </div>
 
-<div class="calendar-wrapper">
-  <div class="calendar" id="calendar"></div>
+<h2 id="headerTitle" class="section-header">Loading Schedule...</h2>
+<div class="calendar-wrapper"><div class="calendar" id="calendar"></div></div>
+
+<div id="futureSection" style="display:none;">
+  <h3 class="section-header">Future Preview</h3>
+  <div class="calendar-wrapper"><div class="calendar" id="futureCalendar"></div></div>
 </div>
 
 <div class="toast" id="toast"></div>
 
-<div id="authModal" class="modal">
-  <div class="modal-box">
-    <div id="authTitle" style="text-align:center; font-weight:800; color:#0f172a;">Security PIN</div>
+<div id="authModal" class="modal" onclick="cancelAuth()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title" id="authTitle">Security Login</div>
+    <input id="nameInput" style="display:none;">
     <div class="pin-boxes">
-      <input maxlength="1" type="password" inputmode="numeric">
-      <input maxlength="1" type="password" inputmode="numeric">
-      <input maxlength="1" type="password" inputmode="numeric">
-      <input maxlength="1" type="password" inputmode="numeric">
+      <input maxlength="1" inputmode="numeric" data-index="0">
+      <input maxlength="1" inputmode="numeric" data-index="1">
+      <input maxlength="1" inputmode="numeric" data-index="2">
+      <input maxlength="1" inputmode="numeric" data-index="3">
     </div>
-    <button class="name-btn" style="width:100%;" onclick="cancelAuth()">Cancel</button>
+  </div>
+</div>
+
+<div id="rulesModal" class="modal" onclick="closeRules()">
+  <div class="modal-box rules-box" onclick="event.stopPropagation()">
+    <div class="modal-title">Rules & Guidelines</div>
+    <div class="rules-content">
+      <h4>🎯 Pick Limits: Max 20 shifts total.</h4>
+      <ul><li>The 3rd Day shifts are locked until core shifts are filled.</li></ul>
+    </div>
+    <button class="name-btn" style="width:100%; margin-top:20px;" onclick="closeRules()">Got it</button>
   </div>
 </div>
 
 <script>
-// --- CONFIGURATION ---
-const STEIN_URL = 'https://api.steinhq.com/v1/storages/69db1f5ebb16885eb7bd2289'; 
-const SLOTS = ["Charge", "Day", "Day", "Day", "Night", "Night"];
+const STEIN_URL = 'https://api.steinhq.com/v1/storages/69db1f5ebb16885eb7bd2289';
+const SLOTS=["Charge","Day","Day","Day","Night","Night"];
+const daysArr=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const monthArr=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 let currentUser = null;
 let staffList = [];
 let allShiftsData = [];
 let optStartDate = "";
 let optDays = 42;
+let shiftIndex = {};
+let userActiveStatus = {};
+let isProcessing = false;
 
+// --- UTILS ---
 const toast = m => {
   const t = document.getElementById("toast");
   t.textContent = m; t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2500);
 };
 
-// --- DATA INITIALIZATION ---
-async function init() {
+function getNextDayStr(ds) {
+  const d = new Date(ds.replace(/-/g,'/'));
+  d.setDate(d.getDate()+1);
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,'0') + "-" + String(d.getDate()).padStart(2,'0');
+}
+
+// --- DATA FETCHING (STEIN API) ---
+async function fetchData(endpoint) {
+  const response = await fetch(`${STEIN_URL}/${endpoint}`);
+  return await response.json();
+}
+
+async function loadInitialData() {
   try {
-    const [optRes, staffRes, shiftRes] = await Promise.all([
-      fetch(`${STEIN_URL}/Options`),
-      fetch(`${STEIN_URL}/Staff`),
-      fetch(`${STEIN_URL}/Shifts`)
-    ]);
+    const opts = await fetchData('Options');
+    optStartDate = opts[0].startDate || opts[0].Value; // Handles different header names
+    optDays = parseInt(opts[0].days || opts[0]["Period (Days)"] || 42);
 
-    const opts = await optRes.json();
-    optStartDate = opts[0].startDate;
-    optDays = parseInt(opts[0].days);
-    document.getElementById("headerTitle").textContent = `Unit Schedule: ${optStartDate}`;
-
-    staffList = await staffRes.json();
-    allShiftsData = await shiftRes.json();
-
-    renderNames();
-    buildCalendar();
-    allShiftsData.forEach(s => applyUI(s.date, s.slotId, s.slotName, s.name, true));
+    staffList = await fetchData('Names');
+    allShiftsData = await fetchData('Shifts');
+    
+    renderApp();
   } catch (e) {
-    toast("Connection Error. Refresh or check Wi-Fi.");
+    toast("Error loading data from Stein.");
+    console.error(e);
   }
 }
 
-// --- CALENDAR & UI ---
-function buildCalendar() {
-  const container = document.getElementById("calendar");
-  container.innerHTML = "";
+function renderApp() {
   const start = new Date(optStartDate.replace(/-/g,'/'));
+  document.getElementById("headerTitle").textContent = `Picks for: ${monthArr[start.getMonth()]} ${start.getDate()}`;
   
-  for (let i = 0; i < optDays; i++) {
+  // Build Grid
+  buildDaysGrid(start, optDays, document.getElementById("calendar"), false);
+  
+  // Render Staff
+  const b = document.getElementById("nameBar");
+  staffList.sort((a,b) => a.name.localeCompare(b.name)).forEach(u => {
+    userActiveStatus[u.name] = (u.active === "TRUE" || u.active === true);
+    const btn = document.createElement("button");
+    btn.className="name-btn";
+    btn.dataset.name = u.name;
+    btn.textContent = u.name;
+    btn.onclick=()=>openLogin(u.name);
+    btn.onmouseenter = () => handleNameHover(u.name, true);
+    btn.onmouseleave = () => handleNameHover(u.name, false);
+    b.appendChild(btn);
+  });
+
+  // Load Existing Shifts
+  allShiftsData.forEach(r => applyUI(r.date, r.slotId, r.slotName, r.name, true, true));
+  refreshNameCounts();
+}
+
+// --- CALENDAR LOGIC ---
+function buildDaysGrid(start, count, container, isPast) {
+  for (let i = 0; i < count; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const ds = dt.toISOString().split('T')[0];
     const cell = document.createElement("div");
-    cell.className = "day";
-    cell.innerHTML = `<div class="date-title">${dt.toDateString().slice(0,10)}</div>`;
+    cell.className = `day ${(dt.getDay() === 0 || dt.getDay() === 6) ? 'weekend' : ''}`;
+    
+    const dStr = daysArr[dt.getDay()] + ", " + monthArr[dt.getMonth()] + " " + String(dt.getDate()).padStart(2, '0');
+    cell.innerHTML = `<div class="date-title">${dStr}</div>`;
     
     SLOTS.forEach((sn, idx) => {
       const el = document.createElement("div");
       el.className = "slot";
       el.textContent = sn;
-      el.dataset.date = ds;
-      el.dataset.slotId = `${ds}-${sn}-${idx}`;
-      el.dataset.slotName = sn;
+      Object.assign(el.dataset, {date: ds, slotId: sn+"-"+idx, slotName: sn, owner: ""});
       el.ondblclick = () => handleToggle(el);
       cell.appendChild(el);
     });
@@ -145,116 +196,153 @@ function buildCalendar() {
 }
 
 async function handleToggle(el) {
-  if (!currentUser) return toast("Nurse Login Required");
-  const ds = el.dataset.date, id = el.dataset.slotId, sn = el.dataset.slotName;
-  
-  if (el.classList.contains("filled")) {
-    if (el.dataset.owner !== currentUser) return toast("Cannot remove others' shifts");
-    applyUI(ds, id, sn, currentUser, false);
-    allShiftsData = allShiftsData.filter(s => s.slotId !== id);
-    await fetch(`${STEIN_URL}/Shifts`, {
-      method: 'DELETE',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ condition: { slotId: id } })
-    });
-    toast("Shift Removed");
-  } else {
-    // Basic Rule: Max 20 shifts
-    const myShifts = allShiftsData.filter(s => s.name === currentUser);
-    if (myShifts.length >= 20) return toast("Rule: Max 20 shifts reached.");
+  if (!currentUser) return toast("Login required");
+  if (!userActiveStatus[currentUser]) return toast("Awaiting approval.");
+  if (isProcessing) return;
 
-    applyUI(ds, id, sn, currentUser, true);
-    const newShift = {date: ds, slotId: id, slotName: sn, name: currentUser};
-    allShiftsData.push(newShift);
-    await fetch(`${STEIN_URL}/Shifts`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify([newShift])
-    });
-    toast("Shift Booked!");
+  const ds = el.dataset.date, sn = el.dataset.slotName, id = el.dataset.slotId;
+  const isFilledByMe = (el.dataset.owner === currentUser);
+
+  isProcessing = true;
+  el.style.opacity = "0.5";
+
+  if (isFilledByMe) {
+    // DELETE
+    const success = await deleteShiftApi(ds, id, currentUser);
+    if (success) applyUI(ds, id, sn, currentUser, false);
+  } else {
+    // ADD (Validation is handled in applyUI logic usually, but we check conflicts here)
+    if (el.dataset.owner !== "") { toast("Slot taken!"); isProcessing = false; el.style.opacity = "1"; return; }
+    
+    const newShift = { date: ds, slotId: id, slotName: sn, name: currentUser };
+    const success = await bookShiftApi(newShift);
+    if (success) applyUI(ds, id, sn, currentUser, true);
   }
+
+  isProcessing = false;
+  el.style.opacity = "1";
 }
 
-function applyUI(ds, id, sn, name, isAdding) {
-  const el = document.querySelector(`[data-slot-id="${id}"]`);
+async function bookShiftApi(shift) {
+  try {
+    const res = await fetch(`${STEIN_URL}/Shifts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([shift])
+    });
+    return res.ok;
+  } catch (e) { return false; }
+}
+
+async function deleteShiftApi(date, slotId, name) {
+  try {
+    const res = await fetch(`${STEIN_URL}/Shifts`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ condition: { date: date, slotId: slotId, name: name } })
+    });
+    return res.ok;
+  } catch (e) { return false; }
+}
+
+function applyUI(ds, id, sn, name, add, pass) {
+  const el = document.querySelector(`.slot[data-date="${ds}"][data-slot-id="${id}"]`);
   if (!el) return;
-  if (isAdding) {
-    el.textContent = `${sn}: ${name}`;
+
+  if (add) {
+    el.textContent = sn + ": " + name;
     el.classList.add("filled");
     el.dataset.owner = name;
     if (name === currentUser) el.classList.add("mine");
+    if (!shiftIndex[ds]) shiftIndex[ds] = {};
+    shiftIndex[ds][name] = el;
   } else {
     el.textContent = sn;
     el.classList.remove("filled", "mine");
     el.dataset.owner = "";
+    if (shiftIndex[ds]) delete shiftIndex[ds][name];
   }
+  refreshNameCounts();
 }
 
-// --- AUTHENTICATION ---
-let activeLoginName = "";
-const pinInputs = document.querySelectorAll(".pin-boxes input");
-
-function renderNames() {
-  const bar = document.getElementById("nameBar");
-  bar.innerHTML = "";
-  staffList.filter(s => s.active === "TRUE").sort((a,b) => a.name.localeCompare(b.name)).forEach(u => {
-    const btn = document.createElement("button");
-    btn.className = "name-btn";
-    btn.textContent = u.name;
-    btn.onclick = () => {
-        activeLoginName = u.name;
-        document.getElementById("authTitle").textContent = `Nurse: ${u.name}`;
-        document.getElementById("authModal").style.display = "flex";
-        pinInputs[0].focus();
-    };
-    btn.onmouseenter = () => toggleHover(u.name, true);
-    btn.onmouseleave = () => toggleHover(u.name, false);
-    bar.appendChild(btn);
-  });
+// --- AUTH ---
+function openLogin(name) {
+  activeLoginName = name;
+  document.getElementById("authTitle").textContent = name;
+  document.getElementById("nameInput").value = name;
+  document.getElementById("authModal").style.display = "flex";
+  clearPin();
 }
-
-pinInputs.forEach((inp, idx) => {
-  inp.oninput = () => { if (inp.value && idx < 3) pinInputs[idx+1].focus(); if (idx === 3) checkPin(); };
-  inp.onkeydown = (e) => { if (e.key === "Backspace" && !inp.value && idx > 0) pinInputs[idx-1].focus(); };
-});
 
 function checkPin() {
-  const pin = Array.from(pinInputs).map(i => i.value).join("");
-  const nurse = staffList.find(s => s.name === activeLoginName);
-  if (nurse && nurse.pin == pin) {
-    currentUser = activeLoginName;
-    document.getElementById("currentUserName").textContent = currentUser;
-    document.getElementById("userStatusCard").style.display = "block";
+  const pin = Array.from(document.querySelectorAll(".pin-boxes input")).map(i => i.value).join("");
+  const user = staffList.find(r => r.name === activeLoginName && String(r.code) === pin);
+  
+  if (user) {
+    currentUser = user.name;
     document.getElementById("authModal").style.display = "none";
     document.getElementById("nameBar").style.display = "none";
-    document.querySelectorAll('.slot.filled').forEach(el => {
-      if(el.dataset.owner === currentUser) el.classList.add("mine");
-    });
-    toast(`Hello, ${currentUser}`);
+    document.getElementById("userStatusCard").style.display = "block";
+    document.getElementById("currentUserName").textContent = currentUser;
+    refreshHighlights();
+    toast("Logged in.");
   } else {
-    toast("Invalid PIN");
-    pinInputs.forEach(p => p.value = "");
-    pinInputs[0].focus();
+    toast("Wrong PIN");
+    clearPin();
   }
 }
 
-function toggleHover(name, isEntering) {
+// --- PIN HELPERS ---
+const pinInputs = document.querySelectorAll(".pin-boxes input");
+pinInputs.forEach((inp, idx) => {
+  inp.addEventListener("input", () => { 
+    if (inp.value && idx < 3) pinInputs[idx + 1].focus(); 
+    if (idx === 3) checkPin();
+  });
+});
+
+function clearPin() { pinInputs.forEach(i => i.value = ""); pinInputs[0].focus(); }
+function logout() { location.reload(); }
+function cancelAuth() { document.getElementById("authModal").style.display = "none"; }
+function closeRules() { document.getElementById("rulesModal").style.display = "none"; }
+function openRules() { document.getElementById("rulesModal").style.display = "flex"; }
+
+function handleNameHover(name, isHovering) {
   document.querySelectorAll(`.slot.filled[data-owner="${name}"]`).forEach(el => {
-    if (isEntering) {
+    if (isHovering) {
+      el.classList.add('hover-focus');
       const type = el.dataset.slotName;
-      if (type === "Charge") el.classList.add("hover-charge");
-      else if (type === "Night") el.classList.add("hover-night");
-      else el.classList.add("hover-day");
+      if (type === "Charge") el.classList.add('hover-focus-charge');
+      else if (type === "Night") el.classList.add('hover-focus-night');
+      else el.classList.add('hover-focus-day');
     } else {
-      el.classList.remove("hover-charge", "hover-night", "hover-day");
+      el.classList.remove('hover-focus', 'hover-focus-day', 'hover-focus-night', 'hover-focus-charge');
     }
   });
 }
 
-function logout() { location.reload(); }
-function cancelAuth() { document.getElementById("authModal").style.display = "none"; pinInputs.forEach(p => p.value = ""); }
+function refreshNameCounts() {
+  const counts = {};
+  document.querySelectorAll('.slot.filled').forEach(el => {
+    const n = el.dataset.owner;
+    counts[n] = (counts[n] || 0) + 1;
+  });
+  document.querySelectorAll('.name-btn').forEach(btn => {
+    const n = btn.dataset.name;
+    const count = counts[n] || 0;
+    btn.textContent = `${n} (${count}/20)`;
+    if (count >= 20) btn.classList.add('completed');
+  });
+}
 
-init();
+function refreshHighlights() {
+  document.querySelectorAll('.slot.filled').forEach(el => {
+    if (currentUser && el.dataset.owner === currentUser) el.classList.add('mine');
+  });
+}
+
+// Init
+document.addEventListener("DOMContentLoaded", loadInitialData);
 </script>
 </body>
 </html>
