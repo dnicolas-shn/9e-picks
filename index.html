@@ -1,21 +1,19 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<base target="_top">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Unit Schedule Picks</title>
 <style>
-  /* CSS remains identical to your original styling for visual consistency */
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; }
   .header-container { display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #ddd; padding-bottom: 15px; margin-bottom: 15px; }
   .top-row { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
   .toggle-past-btn { padding: 8px 16px; border: 1px solid #94a3b8; background: white; color: #475569; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; display: flex; align-items: center; gap: 6px; }
-  .toggle-past-btn:hover { background: #f1f5f9; color: #0f172a; }
-  .toggle-past-btn.active { background: #334155; color: white; border-color: #334155; }
   .rules-btn { padding: 8px 16px; border: 1px solid #cbd5e1; background: white; color: #334155; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .name-bar { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; margin-bottom:15px; }
   .name-btn { padding:8px 14px; border:1px solid #ccc; border-radius:20px; background:white; color: #334155; cursor:pointer; transition: 0.2s; font-weight: 500; }
   .name-btn.completed { background: #fef08a; color: #713f12; border-color: #eab308; font-weight: 700; }
+  .name-btn.register { background:#28a745; color:white; border-color:#28a745; font-weight: 700; }
   .user-status-card { display:none; background:white; padding:15px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-bottom:20px; border-left: 5px solid #007bff; max-width: fit-content; }
   .stats-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   .stat-badge { background: #f1f5f9; color: #475569; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 700; border: 1px solid #e2e8f0; }
@@ -34,25 +32,22 @@
   .modal-box { background:white; padding:25px; border-radius:12px; width:90%; max-width:350px; }
   .pin-boxes { display:flex; justify-content:center; gap:10px; margin-top:20px; }
   .pin-boxes input { width:50px; height:60px; font-size:28px; text-align:center; border:2px solid #ddd; border-radius:10px; }
+  #nameInput { width:100%; padding:12px; margin-top:15px; border:2px solid #ddd; border-radius:8px; box-sizing:border-box; font-size: 20px; font-weight: 700; text-align: center; color: #007bff; }
   .toast { position: fixed !important; top: 20px !important; left: 50% !important; transform: translateX(-50%) !important; background: rgba(15, 23, 42, 0.95); color: white; padding: 12px 24px; border-radius: 50px; opacity: 0; transition: 0.3s; z-index: 10000; pointer-events: none; font-weight: 600; }
   .toast.show { opacity: 1; top: 30px !important; }
 </style>
 </head>
 <body>
 
-<div id="pastSection" style="display:none;">
-  <h3 class="section-header" id="pastHeaderTitle">Loading...</h3>
-  <div class="calendar-wrapper"><div class="calendar" id="pastCalendar"></div></div>
-</div>
-
 <div class="header-container">
   <div class="top-row">
-    <button id="togglePastBtn" class="toggle-past-btn" onclick="togglePastWeeks()" style="display:none;">View Past 2 Weeks</button>
     <button class="rules-btn" onclick="openRules()">📖 Rules & Guidelines</button>
   </div>
 </div>
 
-<div class="name-bar" id="nameBar"></div>
+<div class="name-bar" id="nameBar">
+  <button class="name-btn register" onclick="openRegister()">+ New User</button>
+</div>
 
 <div class="user-status-card" id="userStatusCard">
   <div class="user-header-row">
@@ -65,17 +60,12 @@
 <h2 id="headerTitle" class="section-header">Loading Schedule...</h2>
 <div class="calendar-wrapper"><div class="calendar" id="calendar"></div></div>
 
-<div id="futureSection" style="display:none;">
-  <h3 class="section-header">Future Preview</h3>
-  <div class="calendar-wrapper"><div class="calendar" id="futureCalendar"></div></div>
-</div>
-
 <div class="toast" id="toast"></div>
 
 <div id="authModal" class="modal" onclick="cancelAuth()">
   <div class="modal-box" onclick="event.stopPropagation()">
     <div class="modal-title" id="authTitle">Security Login</div>
-    <input id="nameInput" style="display:none;">
+    <input id="nameInput" placeholder="Enter Name">
     <div class="pin-boxes">
       <input maxlength="1" inputmode="numeric" data-index="0">
       <input maxlength="1" inputmode="numeric" data-index="1">
@@ -90,7 +80,7 @@
     <div class="modal-title">Rules & Guidelines</div>
     <div class="rules-content">
       <h4>🎯 Pick Limits: Max 20 shifts total.</h4>
-      <ul><li>The 3rd Day shifts are locked until core shifts are filled.</li></ul>
+      <ul><li>Standard nursing unit rules apply.</li></ul>
     </div>
     <button class="name-btn" style="width:100%; margin-top:20px;" onclick="closeRules()">Got it</button>
   </div>
@@ -107,54 +97,48 @@ let staffList = [];
 let allShiftsData = [];
 let optStartDate = "";
 let optDays = 42;
-let shiftIndex = {};
+let authMode = "login";
+let activeLoginName = "";
 let userActiveStatus = {};
-let isProcessing = false;
 
-// --- UTILS ---
 const toast = m => {
   const t = document.getElementById("toast");
   t.textContent = m; t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2500);
 };
 
-function getNextDayStr(ds) {
-  const d = new Date(ds.replace(/-/g,'/'));
-  d.setDate(d.getDate()+1);
-  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,'0') + "-" + String(d.getDate()).padStart(2,'0');
-}
-
-// --- DATA FETCHING (STEIN API) ---
-async function fetchData(endpoint) {
-  const response = await fetch(`${STEIN_URL}/${endpoint}`);
-  return await response.json();
-}
-
-async function loadInitialData() {
+async function init() {
   try {
-    const opts = await fetchData('Options');
-    optStartDate = opts[0].startDate || opts[0].Value; // Handles different header names
+    const [optRes, staffRes, shiftRes] = await Promise.all([
+      fetch(`${STEIN_URL}/Options`),
+      fetch(`${STEIN_URL}/Names`),
+      fetch(`${STEIN_URL}/Shifts`)
+    ]);
+    const opts = await optRes.json();
+    optStartDate = opts[0].startDate || opts[0].Value;
     optDays = parseInt(opts[0].days || opts[0]["Period (Days)"] || 42);
-
-    staffList = await fetchData('Names');
-    allShiftsData = await fetchData('Shifts');
-    
+    staffList = await staffRes.json();
+    allShiftsData = await shiftRes.json();
     renderApp();
   } catch (e) {
-    toast("Error loading data from Stein.");
-    console.error(e);
+    toast("Error loading data.");
   }
 }
 
 function renderApp() {
   const start = new Date(optStartDate.replace(/-/g,'/'));
-  document.getElementById("headerTitle").textContent = `Picks for: ${monthArr[start.getMonth()]} ${start.getDate()}`;
-  
-  // Build Grid
-  buildDaysGrid(start, optDays, document.getElementById("calendar"), false);
-  
-  // Render Staff
+  document.getElementById("headerTitle").textContent = `Schedule: ${monthArr[start.getMonth()]} ${start.getDate()}`;
+  buildDaysGrid(start, optDays, document.getElementById("calendar"));
+  renderNameButtons();
+  allShiftsData.forEach(r => applyUI(r.date, r.slotId, r.slotName, r.name, true, true));
+  refreshNameCounts();
+}
+
+function renderNameButtons() {
   const b = document.getElementById("nameBar");
+  const regBtn = b.querySelector('.register');
+  b.innerHTML = "";
+  b.appendChild(regBtn);
   staffList.sort((a,b) => a.name.localeCompare(b.name)).forEach(u => {
     userActiveStatus[u.name] = (u.active === "TRUE" || u.active === true);
     const btn = document.createElement("button");
@@ -162,27 +146,20 @@ function renderApp() {
     btn.dataset.name = u.name;
     btn.textContent = u.name;
     btn.onclick=()=>openLogin(u.name);
-    btn.onmouseenter = () => handleNameHover(u.name, true);
-    btn.onmouseleave = () => handleNameHover(u.name, false);
+    btn.onmouseenter = () => handleHover(u.name, true);
+    btn.onmouseleave = () => handleHover(u.name, false);
     b.appendChild(btn);
   });
-
-  // Load Existing Shifts
-  allShiftsData.forEach(r => applyUI(r.date, r.slotId, r.slotName, r.name, true, true));
-  refreshNameCounts();
 }
 
-// --- CALENDAR LOGIC ---
-function buildDaysGrid(start, count, container, isPast) {
+function buildDaysGrid(start, count, container) {
+  container.innerHTML = "";
   for (let i = 0; i < count; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const ds = dt.toISOString().split('T')[0];
     const cell = document.createElement("div");
-    cell.className = `day ${(dt.getDay() === 0 || dt.getDay() === 6) ? 'weekend' : ''}`;
-    
-    const dStr = daysArr[dt.getDay()] + ", " + monthArr[dt.getMonth()] + " " + String(dt.getDate()).padStart(2, '0');
-    cell.innerHTML = `<div class="date-title">${dStr}</div>`;
-    
+    cell.className = "day";
+    cell.innerHTML = `<div class="date-title">${daysArr[dt.getDay()]}, ${monthArr[dt.getMonth()]} ${dt.getDate()}</div>`;
     SLOTS.forEach((sn, idx) => {
       const el = document.createElement("div");
       el.className = "slot";
@@ -198,151 +175,105 @@ function buildDaysGrid(start, count, container, isPast) {
 async function handleToggle(el) {
   if (!currentUser) return toast("Login required");
   if (!userActiveStatus[currentUser]) return toast("Awaiting approval.");
-  if (isProcessing) return;
-
   const ds = el.dataset.date, sn = el.dataset.slotName, id = el.dataset.slotId;
-  const isFilledByMe = (el.dataset.owner === currentUser);
-
-  isProcessing = true;
-  el.style.opacity = "0.5";
-
-  if (isFilledByMe) {
-    // DELETE
-    const success = await deleteShiftApi(ds, id, currentUser);
-    if (success) applyUI(ds, id, sn, currentUser, false);
-  } else {
-    // ADD (Validation is handled in applyUI logic usually, but we check conflicts here)
-    if (el.dataset.owner !== "") { toast("Slot taken!"); isProcessing = false; el.style.opacity = "1"; return; }
-    
+  if (el.dataset.owner === currentUser) {
+    applyUI(ds, id, sn, currentUser, false);
+    await fetch(`${STEIN_URL}/Shifts`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ condition: { date: ds, slotId: id, name: currentUser } }) });
+  } else if (el.dataset.owner === "") {
+    if (allShiftsData.filter(s => s.name === currentUser).length >= 20) return toast("Max 20 shifts.");
+    applyUI(ds, id, sn, currentUser, true);
     const newShift = { date: ds, slotId: id, slotName: sn, name: currentUser };
-    const success = await bookShiftApi(newShift);
-    if (success) applyUI(ds, id, sn, currentUser, true);
+    allShiftsData.push(newShift);
+    await fetch(`${STEIN_URL}/Shifts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([newShift]) });
   }
-
-  isProcessing = false;
-  el.style.opacity = "1";
-}
-
-async function bookShiftApi(shift) {
-  try {
-    const res = await fetch(`${STEIN_URL}/Shifts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify([shift])
-    });
-    return res.ok;
-  } catch (e) { return false; }
-}
-
-async function deleteShiftApi(date, slotId, name) {
-  try {
-    const res = await fetch(`${STEIN_URL}/Shifts`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ condition: { date: date, slotId: slotId, name: name } })
-    });
-    return res.ok;
-  } catch (e) { return false; }
 }
 
 function applyUI(ds, id, sn, name, add, pass) {
   const el = document.querySelector(`.slot[data-date="${ds}"][data-slot-id="${id}"]`);
   if (!el) return;
-
   if (add) {
-    el.textContent = sn + ": " + name;
-    el.classList.add("filled");
-    el.dataset.owner = name;
+    el.textContent = sn + ": " + name; el.classList.add("filled"); el.dataset.owner = name;
     if (name === currentUser) el.classList.add("mine");
-    if (!shiftIndex[ds]) shiftIndex[ds] = {};
-    shiftIndex[ds][name] = el;
   } else {
-    el.textContent = sn;
-    el.classList.remove("filled", "mine");
-    el.dataset.owner = "";
-    if (shiftIndex[ds]) delete shiftIndex[ds][name];
+    el.textContent = sn; el.classList.remove("filled", "mine"); el.dataset.owner = "";
   }
   refreshNameCounts();
 }
 
 // --- AUTH ---
 function openLogin(name) {
+  authMode = "login";
   activeLoginName = name;
   document.getElementById("authTitle").textContent = name;
-  document.getElementById("nameInput").value = name;
+  document.getElementById("nameInput").style.display = "none";
   document.getElementById("authModal").style.display = "flex";
   clearPin();
 }
 
-function checkPin() {
+function openRegister() {
+  authMode = "register";
+  document.getElementById("authTitle").textContent = "New User";
+  document.getElementById("nameInput").style.display = "block";
+  document.getElementById("nameInput").value = "";
+  document.getElementById("authModal").style.display = "flex";
+  clearPin();
+}
+
+async function checkPin() {
   const pin = Array.from(document.querySelectorAll(".pin-boxes input")).map(i => i.value).join("");
-  const user = staffList.find(r => r.name === activeLoginName && String(r.code) === pin);
-  
-  if (user) {
-    currentUser = user.name;
-    document.getElementById("authModal").style.display = "none";
-    document.getElementById("nameBar").style.display = "none";
-    document.getElementById("userStatusCard").style.display = "block";
-    document.getElementById("currentUserName").textContent = currentUser;
-    refreshHighlights();
-    toast("Logged in.");
+  if (authMode === "register") {
+    const name = document.getElementById("nameInput").value.trim();
+    if (!name || pin.length < 4) return toast("Enter name and 4-digit PIN");
+    const newUser = { name: name, code: pin, active: "FALSE" };
+    await fetch(`${STEIN_URL}/Names`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([newUser]) });
+    toast("Registered! Awaiting approval.");
+    location.reload();
   } else {
-    toast("Wrong PIN");
-    clearPin();
+    const user = staffList.find(r => r.name === activeLoginName && String(r.code) === pin);
+    if (user) {
+      currentUser = user.name;
+      document.getElementById("authModal").style.display = "none";
+      document.getElementById("nameBar").style.display = "none";
+      document.getElementById("userStatusCard").style.display = "block";
+      document.getElementById("currentUserName").textContent = currentUser;
+      toast("Logged in.");
+    } else { toast("Wrong PIN"); clearPin(); }
   }
 }
 
-// --- PIN HELPERS ---
 const pinInputs = document.querySelectorAll(".pin-boxes input");
 pinInputs.forEach((inp, idx) => {
-  inp.addEventListener("input", () => { 
-    if (inp.value && idx < 3) pinInputs[idx + 1].focus(); 
-    if (idx === 3) checkPin();
-  });
+  inp.addEventListener("input", () => { if (inp.value && idx < 3) pinInputs[idx + 1].focus(); if (idx === 3) checkPin(); });
 });
 
 function clearPin() { pinInputs.forEach(i => i.value = ""); pinInputs[0].focus(); }
 function logout() { location.reload(); }
 function cancelAuth() { document.getElementById("authModal").style.display = "none"; }
-function closeRules() { document.getElementById("rulesModal").style.display = "none"; }
 function openRules() { document.getElementById("rulesModal").style.display = "flex"; }
-
-function handleNameHover(name, isHovering) {
+function closeRules() { document.getElementById("rulesModal").style.display = "none"; }
+function handleHover(name, isH) {
   document.querySelectorAll(`.slot.filled[data-owner="${name}"]`).forEach(el => {
-    if (isHovering) {
+    if (isH) {
       el.classList.add('hover-focus');
-      const type = el.dataset.slotName;
-      if (type === "Charge") el.classList.add('hover-focus-charge');
-      else if (type === "Night") el.classList.add('hover-focus-night');
+      const t = el.dataset.slotName;
+      if (t === "Charge") el.classList.add('hover-focus-charge');
+      else if (t === "Night") el.classList.add('hover-focus-night');
       else el.classList.add('hover-focus-day');
-    } else {
-      el.classList.remove('hover-focus', 'hover-focus-day', 'hover-focus-night', 'hover-focus-charge');
-    }
+    } else { el.classList.remove('hover-focus', 'hover-focus-day', 'hover-focus-night', 'hover-focus-charge'); }
   });
 }
-
 function refreshNameCounts() {
   const counts = {};
-  document.querySelectorAll('.slot.filled').forEach(el => {
-    const n = el.dataset.owner;
-    counts[n] = (counts[n] || 0) + 1;
-  });
+  document.querySelectorAll('.slot.filled').forEach(el => { counts[el.dataset.owner] = (counts[el.dataset.owner] || 0) + 1; });
   document.querySelectorAll('.name-btn').forEach(btn => {
-    const n = btn.dataset.name;
-    const count = counts[n] || 0;
-    btn.textContent = `${n} (${count}/20)`;
-    if (count >= 20) btn.classList.add('completed');
+    const n = btn.dataset.name; if (!n) return;
+    const c = counts[n] || 0;
+    btn.textContent = `${n} (${c}/20)`;
+    if (c >= 20) btn.classList.add('completed');
   });
 }
 
-function refreshHighlights() {
-  document.querySelectorAll('.slot.filled').forEach(el => {
-    if (currentUser && el.dataset.owner === currentUser) el.classList.add('mine');
-  });
-}
-
-// Init
-document.addEventListener("DOMContentLoaded", loadInitialData);
+document.addEventListener("DOMContentLoaded", init);
 </script>
 </body>
 </html>
