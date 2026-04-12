@@ -12,8 +12,6 @@
   .name-btn.completed { background: #fef08a; color: #713f12; border-color: #eab308; font-weight: 700; }
   .name-btn.register { background:#28a745; color:white; border-color:#28a745; font-weight: 700; }
   .user-status-card { display:none; background:white; padding:15px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-bottom:20px; border-left: 5px solid #007bff; max-width: fit-content; }
-  .stats-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-  .stat-badge { background: #f1f5f9; color: #475569; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 700; border: 1px solid #e2e8f0; }
   .calendar-wrapper { overflow-x: auto; padding-bottom: 10px; width: 100%; }
   .calendar { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 48px 10px; min-width: 1000px; padding-top: 15px; }
   @media (min-width: 1200px) { .calendar { grid-template-columns: repeat(14, minmax(125px, 1fr)); min-width: 1800px; } }
@@ -22,10 +20,6 @@
   .slot { border:1px solid #eee; padding:6px; background:#f8f9fa; margin-bottom:5px; border-radius:4px; cursor:pointer; font-size:12px; transition: 0.2s; }
   .slot.filled { background:#cbd5e1; color:#334155; border-color:#94a3b8; cursor:not-allowed; }
   .slot.filled.mine { background:#007bff; color:white; border-color:#0056b3; }
-  .slot.hover-focus { transform: scale(1.05); z-index: 5; font-weight: 700; }
-  .slot.hover-focus-day { background: #fef08a !important; color: #854d0e !important; }
-  .slot.hover-focus-night { background: #d8b4fe !important; color: #581c87 !important; }
-  .slot.hover-focus-charge { background: #facc15 !important; color: #713f12 !important; }
   .modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items: flex-start; justify-content:center; z-index:999; padding-top: 50px; }
   .modal-box { background:white; padding:25px; border-radius:12px; width:90%; max-width:350px; }
   .pin-boxes { display:flex; justify-content:center; gap:10px; margin-top:20px; }
@@ -39,7 +33,7 @@
 
 <div class="header-container">
   <div class="top-row">
-    <button class="name-btn" style="font-size: 11px;" onclick="location.reload()">🔄 Force Sync Sheet</button>
+    <button class="name-btn" style="font-size: 11px;" onclick="location.reload()">🔄 Refresh Schedule</button>
   </div>
 </div>
 
@@ -49,13 +43,12 @@
 
 <div class="user-status-card" id="userStatusCard">
   <div class="user-header-row">
-    <div class="user-info">Logged In: <span id="currentUserName" style="color:#007bff;"></span></div>
+    <div class="user-info">Nurse: <span id="currentUserName" style="color:#007bff;"></span></div>
     <button class="logout-btn" onclick="logout()" style="cursor:pointer; background:#fee2e2; border:1px solid #fecaca; padding:4px 8px; border-radius:4px; font-size:11px; color:#991b1b;">Logout</button>
   </div>
-  <div class="stats-bar" id="statsBar"></div>
 </div>
 
-<h2 id="headerTitle" class="section-header">Detecting Sheet Headers...</h2>
+<h2 id="headerTitle" class="section-header">Loading...</h2>
 <div class="calendar-wrapper"><div class="calendar" id="calendar"></div></div>
 
 <div class="toast" id="toast"></div>
@@ -93,69 +86,70 @@ const toast = m => {
   setTimeout(() => t.classList.remove("show"), 2500);
 };
 
-// --- HEADER ENFORCER LOGIC ---
-// This ensures that even if headers are renamed, the app finds the right data.
-function normalizeData(array, mapping) {
-  if (!array || array.length === 0) return [];
+// --- DATA NORMALIZER ---
+function normalize(array, mapping) {
+  if (!array || !Array.isArray(array)) return [];
   return array.map(row => {
-    let newRow = {};
-    for (let internalKey in mapping) {
-      const possibleNames = mapping[internalKey];
-      // Find which key in the row matches our list of possible header names
-      const foundKey = Object.keys(row).find(k => 
-        possibleNames.includes(k.toLowerCase().trim())
-      );
-      newRow[internalKey] = foundKey ? row[foundKey] : null;
+    let clean = {};
+    for (let key in mapping) {
+      const match = Object.keys(row).find(k => mapping[key].includes(k.toLowerCase().trim()));
+      clean[key] = match ? row[match] : null;
     }
-    return newRow;
+    return clean;
   });
 }
 
-// --- DATA INIT ---
+// --- SMART FETCH WITH RETRY ---
+async function fetchWithRetry(url, options = {}, retries = 1) {
+  try {
+    const response = await fetch(url, options);
+    if (response.status === 429 && retries > 0) {
+      console.log("Rate limited. Retrying...");
+      await new Promise(res => setTimeout(res, 1000));
+      return fetchWithRetry(url, options, retries - 1);
+    }
+    return response;
+  } catch (e) {
+    throw e;
+  }
+}
+
+// --- INIT ---
 async function init() {
   try {
-    const [optRes, staffRes, shiftRes] = await Promise.all([
-      fetch(`${STEIN_URL}/Options`),
-      fetch(`${STEIN_URL}/Names`),
-      fetch(`${STEIN_URL}/Shifts`)
+    const [optR, staffR, shiftR] = await Promise.all([
+      fetchWithRetry(`${STEIN_URL}/Options`),
+      fetchWithRetry(`${STEIN_URL}/Names`),
+      fetchWithRetry(`${STEIN_URL}/Shifts`)
     ]);
 
-    const optsRaw = await optRes.json();
-    const staffRaw = await staffRes.json();
-    const shiftRaw = await shiftRes.json();
-
-    // Enforce Options Headers
-    const cleanOpts = normalizeData(optsRaw, {
+    const optsRaw = await optR.json();
+    const cleanOpts = normalize(optsRaw, {
       start: ['startdate', 'start', 'value', 'date'],
-      days: ['days', 'period', 'period (days)', 'length']
+      days: ['days', 'period', 'period (days)']
     });
     optStartDate = cleanOpts[0].start;
     optDays = parseInt(cleanOpts[0].days || 42);
 
-    // Enforce Staff Headers
-    staffList = normalizeData(staffRaw, {
-      name: ['name', 'staff', 'full name', 'nurse'],
-      code: ['code', 'pin', 'pass', 'password', 'secret'],
-      active: ['active', 'status', 'approved', 'enabled']
+    staffList = normalize(await staffR.json(), {
+      name: ['name', 'staff', 'full name'],
+      code: ['code', 'pin', 'pass'],
+      active: ['active', 'status', 'approved']
     });
 
-    // Enforce Shift Headers
-    allShiftsData = normalizeData(shiftRaw, {
+    allShiftsData = normalize(await shiftR.json(), {
       date: ['date', 'day'],
-      slotId: ['slotid', 'id', 'positionid'],
-      slotName: ['slotname', 'slot', 'type'],
-      name: ['name', 'staff', 'owner']
+      slotId: ['slotid', 'id'],
+      slotName: ['slotname', 'slot'],
+      name: ['name', 'staff']
     });
 
     document.getElementById("headerTitle").textContent = `Unit Schedule: ${optStartDate}`;
     renderNames();
     buildCalendar();
-    
-    allShiftsData.forEach(s => {
-      if(s.date && s.slotId) applyUI(s.date, s.slotId, s.slotName, s.name, true, true);
-    });
+    allShiftsData.forEach(s => { if(s.date && s.slotId) applyUI(s.date, s.slotId, s.slotName, s.name, true); });
   } catch (e) {
-    toast("Check Google Sheet Tabs/Headers.");
+    toast("Connection slow. Trying to reload...");
     console.error(e);
   }
 }
@@ -164,14 +158,12 @@ function buildCalendar() {
   const container = document.getElementById("calendar");
   container.innerHTML = "";
   const start = new Date(optStartDate.replace(/-/g,'/'));
-  
   for (let i = 0; i < optDays; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const ds = dt.toISOString().split('T')[0];
     const cell = document.createElement("div");
     cell.className = "day";
     cell.innerHTML = `<div class="date-title">${dt.toDateString().slice(0,10)}</div>`;
-    
     SLOTS.forEach((sn, idx) => {
       const el = document.createElement("div");
       el.className = "slot";
@@ -193,29 +185,27 @@ async function handleToggle(el) {
   if (el.dataset.owner === currentUser) {
     applyUI(ds, id, sn, currentUser, false);
     allShiftsData = allShiftsData.filter(s => !(s.date === ds && s.slotId === id));
-    await fetch(`${STEIN_URL}/Shifts`, {
+    await fetchWithRetry(`${STEIN_URL}/Shifts`, {
       method: 'DELETE',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ condition: { date: ds, slotId: id, name: currentUser } })
     });
   } else if (el.dataset.owner === "") {
-    if (allShiftsData.filter(s => s.name === currentUser).length >= 20) return toast("Max 20 shifts allowed.");
-    
+    if (allShiftsData.filter(s => s.name === currentUser).length >= 20) return toast("Limit reached.");
     applyUI(ds, id, sn, currentUser, true);
-    const newShift = { date: ds, slotId: id, slotName: sn, name: currentUser };
-    allShiftsData.push(newShift);
-    await fetch(`${STEIN_URL}/Shifts`, {
+    allShiftsData.push({ date: ds, slotId: id, slotName: sn, name: currentUser });
+    await fetchWithRetry(`${STEIN_URL}/Shifts`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify([newShift])
+      body: JSON.stringify([{ date: ds, slotId: id, slotName: sn, name: currentUser }])
     });
   }
 }
 
-function applyUI(ds, id, sn, name, isAdding, pass) {
+function applyUI(ds, id, sn, name, isAdd) {
   const el = document.querySelector(`.slot[data-date="${ds}"][data-slot-id="${id}"]`);
   if (!el) return;
-  if (isAdding) {
+  if (isAdd) {
     el.textContent = `${sn}: ${name}`;
     el.classList.add("filled");
     el.dataset.owner = name;
@@ -225,32 +215,24 @@ function applyUI(ds, id, sn, name, isAdding, pass) {
     el.classList.remove("filled", "mine");
     el.dataset.owner = "";
   }
-  refreshNameCounts();
 }
 
-// --- AUTH & REGISTER ---
+// --- AUTH ---
 function renderNames() {
   const b = document.getElementById("nameBar");
   const regBtn = b.querySelector('.register');
-  b.innerHTML = "";
-  b.appendChild(regBtn);
-  
+  b.innerHTML = ""; b.appendChild(regBtn);
   staffList.forEach(u => {
-    userActiveStatus[u.name] = (String(u.active).toUpperCase() === "TRUE" || u.active === true);
+    userActiveStatus[u.name] = (String(u.active).toUpperCase() === "TRUE");
     const btn = document.createElement("button");
-    btn.className="name-btn";
-    btn.dataset.name = u.name;
-    btn.textContent = u.name;
+    btn.className="name-btn"; btn.dataset.name = u.name; btn.textContent = u.name;
     btn.onclick=()=>openLogin(u.name);
-    btn.onmouseenter = () => handleHover(u.name, true);
-    btn.onmouseleave = () => handleHover(u.name, false);
     b.appendChild(btn);
   });
 }
 
 function openLogin(name) {
-  authMode = "login";
-  activeLoginName = name;
+  authMode = "login"; activeLoginName = name;
   document.getElementById("authTitle").textContent = name;
   document.getElementById("nameInput").style.display = "none";
   document.getElementById("authModal").style.display = "flex";
@@ -259,9 +241,8 @@ function openLogin(name) {
 
 function openRegister() {
   authMode = "register";
-  document.getElementById("authTitle").textContent = "Register Staff";
+  document.getElementById("authTitle").textContent = "Register";
   document.getElementById("nameInput").style.display = "block";
-  document.getElementById("nameInput").value = "";
   document.getElementById("authModal").style.display = "flex";
   clearPin();
 }
@@ -272,15 +253,13 @@ async function checkPin() {
 
   if (authMode === "register") {
     const name = document.getElementById("nameInput").value.trim();
-    if (!name) return toast("Enter Full Name");
-    // Registration always sends lowercase keys for sheet safety
-    const newUser = { name: name, code: pin, active: "FALSE" };
-    await fetch(`${STEIN_URL}/Names`, {
+    if (!name) return toast("Enter Name");
+    await fetchWithRetry(`${STEIN_URL}/Names`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify([newUser])
+      body: JSON.stringify([{ name: name, code: pin, active: "FALSE" }])
     });
-    toast("Registered. Ask Admin to check Active box.");
+    toast("Registered! Please wait for approval.");
     setTimeout(() => location.reload(), 2000);
   } else {
     const user = staffList.find(u => u.name === activeLoginName && String(u.code) === pin);
@@ -293,11 +272,8 @@ async function checkPin() {
       document.querySelectorAll('.slot.filled').forEach(el => {
         if(el.dataset.owner === currentUser) el.classList.add("mine");
       });
-      toast(`Signed in: ${currentUser}`);
-    } else {
-      toast("Invalid PIN");
-      clearPin();
-    }
+      toast(`Hello, ${currentUser}`);
+    } else { toast("Wrong PIN"); clearPin(); }
   }
 }
 
@@ -310,31 +286,6 @@ pinInputs.forEach((inp, idx) => {
 function clearPin() { pinInputs.forEach(i => i.value = ""); pinInputs[0].focus(); }
 function logout() { location.reload(); }
 function cancelAuth() { document.getElementById("authModal").style.display = "none"; }
-function handleHover(name, isH) {
-  document.querySelectorAll(`.slot.filled[data-owner="${name}"]`).forEach(el => {
-    if (isH) {
-      el.classList.add('hover-focus');
-      const t = el.dataset.slotName;
-      if (t === "Charge") el.classList.add('hover-focus-charge');
-      else if (t === "Night") el.classList.add('hover-focus-night');
-      else el.classList.add('hover-focus-day');
-    } else { el.classList.remove('hover-focus', 'hover-focus-day', 'hover-focus-night', 'hover-focus-charge'); }
-  });
-}
-
-function refreshNameCounts() {
-  const counts = {};
-  document.querySelectorAll('.slot.filled').forEach(el => { 
-    const owner = el.dataset.owner;
-    counts[owner] = (counts[owner] || 0) + 1; 
-  });
-  document.querySelectorAll('.name-btn:not(.register)').forEach(btn => {
-    const n = btn.dataset.name;
-    const c = counts[n] || 0;
-    btn.textContent = `${n} (${c}/20)`;
-    if (c >= 20) btn.classList.add('completed');
-  });
-}
 
 document.addEventListener("DOMContentLoaded", init);
 </script>
