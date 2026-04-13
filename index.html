@@ -7,7 +7,7 @@
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; color: #1e293b; }
   .header-container { display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #ddd; padding-bottom: 15px; margin-bottom: 15px; }
-  .top-row { display: flex; gap: 10px; }
+  .top-row { display: flex; gap: 10px; flex-wrap: wrap; }
   
   .name-bar { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; margin-bottom:15px; }
   .name-btn { padding:8px 14px; border:1px solid #ccc; border-radius:20px; background:white; color: #334155; cursor:pointer; transition: 0.2s; font-weight: 500; }
@@ -40,7 +40,7 @@
   th, td { border: 1px solid #eee; padding: 8px; text-align: left; }
   th { background: #f8f9fa; color: #64748b; }
   
-  .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #1e293b; color: white; padding: 12px 24px; border-radius: 50px; opacity: 0; transition: 0.3s; z-index: 10000; pointer-events: none; }
+  .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #ef4444; color: white; padding: 12px 24px; border-radius: 50px; opacity: 0; transition: 0.3s; z-index: 10000; pointer-events: none; font-weight: bold; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
   .toast.show { opacity: 1; top: 30px; }
   
   .action-btn { padding: 8px 16px; border-radius: 6px; border: 1px solid #ddd; cursor: pointer; font-weight: bold; background: white; }
@@ -102,7 +102,6 @@
 </div>
 
 <script>
-// CONFIG
 const SLOTS = ["Charge", "Day", "Day", "Day", "Night", "Night"];
 const START_DATE = "2024-05-13"; 
 const DAYS_COUNT = 42;
@@ -141,19 +140,74 @@ function buildCalendar() {
 }
 
 function handleToggle(el) {
-  if (!currentUser) { toast("Select a user name first!"); return; }
+  if (!currentUser) { toast("Select a user name first!", "#1e293b"); return; }
   const { date, slotId, slotName, owner } = el.dataset;
   
   if (owner === currentUser) {
     applyUI(date, slotId, slotName, currentUser, false);
     shiftsData = shiftsData.filter(s => !(s.date === date && s.slotId === slotId));
   } else if (owner === "") {
+    
+    // CONSTRAINT 1: Only one slot per calendar date
+    const hasShiftToday = shiftsData.some(s => s.name === currentUser && s.date === date);
+    if (hasShiftToday) {
+        toast("❌ Error: You already have a shift on this date.");
+        return;
+    }
+
+    // CONSTRAINT 2: Max 3 in a row
+    if (checkSequenceLimit(date, slotName)) {
+        const type = (slotName === "Night") ? "Nights" : "Day/Charge shifts";
+        toast(`❌ Error: Max 3 ${type} in a row.`);
+        return;
+    }
+
     applyUI(date, slotId, slotName, currentUser, true);
     shiftsData.push({ date, slotId, slotName, name: currentUser });
   }
   
   localStorage.setItem('org_shifts', JSON.stringify(shiftsData));
   updateTables();
+}
+
+/**
+ * Checks if adding a shift on specific date would exceed 3 in a row of that type.
+ * "Charge" and "Day" are treated as the same group for this logic.
+ */
+function checkSequenceLimit(targetDate, targetSlotName) {
+    const isNightGroup = (targetSlotName === "Night");
+    
+    // Helper to see if a specific date has a shift of the same type group
+    const hasShiftOn = (dateStr) => {
+        return shiftsData.some(s => {
+            if (s.name !== currentUser || s.date !== dateStr) return false;
+            const sIsNight = (s.slotName === "Night");
+            return isNightGroup ? sIsNight : !sIsNight;
+        });
+    };
+
+    const date = new Date(targetDate.replace(/-/g, '/'));
+
+    // Check sequences relative to target date:
+    // Case 1: [T-3, T-2, T-1, (T)]
+    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, -3))) return true;
+    
+    // Case 2: [T-2, T-1, (T), T+1]
+    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, +1))) return true;
+    
+    // Case 3: [T-1, (T), T+1, T+2]
+    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2))) return true;
+    
+    // Case 4: [(T), T+1, T+2, T+3]
+    if (hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2)) && hasShiftOn(getOffsetDate(date, +3))) return true;
+
+    return false;
+}
+
+function getOffsetDate(baseDate, offset) {
+    const d = new Date(baseDate);
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().split('T')[0];
 }
 
 function applyUI(ds, id, sn, name, isAdd) {
@@ -176,7 +230,7 @@ function renderNames() {
   const b = document.getElementById("nameBar");
   const regBtn = b.querySelector('.register');
   b.innerHTML = ""; b.appendChild(regBtn);
-  staffList.forEach(name => {
+  staffList.sort().forEach(name => {
     const btn = document.createElement("button");
     btn.className = "name-btn" + (currentUser === name ? " active-user" : "");
     btn.textContent = name;
@@ -190,7 +244,6 @@ function selectUser(name) {
   document.getElementById("userStatusCard").style.display = "block";
   document.getElementById("currentUserName").textContent = name;
   renderNames();
-  // Refresh calendar highlight
   document.querySelectorAll('.slot').forEach(el => {
     el.classList.remove("mine");
     if(el.dataset.owner === currentUser) el.classList.add("mine");
@@ -212,7 +265,6 @@ function saveUser() {
 }
 
 function updateTables() {
-  // Update Data Table
   const tbody = document.querySelector("#dataTable tbody");
   tbody.innerHTML = "";
   shiftsData.sort((a,b) => a.date.localeCompare(b.date)).forEach(s => {
@@ -220,10 +272,9 @@ function updateTables() {
     row.innerHTML = `<td>${s.date}</td><td>${s.slotName}</td><td>${s.name}</td>`;
   });
 
-  // Update Staff Table
   const sBody = document.querySelector("#staffTable tbody");
   sBody.innerHTML = "";
-  staffList.forEach(name => {
+  staffList.sort().forEach(name => {
     const count = shiftsData.filter(s => s.name === name).length;
     const row = sBody.insertRow();
     row.innerHTML = `<td>${name}</td><td>${count}</td>`;
@@ -266,7 +317,14 @@ function resetApp() {
 }
 
 function logout() { currentUser = null; location.reload(); }
-const toast = m => { const t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 3000); };
+
+const toast = (m, bg = "#ef4444") => { 
+    const t = document.getElementById("toast"); 
+    t.style.background = bg;
+    t.textContent = m; 
+    t.classList.add("show"); 
+    setTimeout(() => t.classList.remove("show"), 3500); 
+};
 
 document.addEventListener("DOMContentLoaded", init);
 </script>
