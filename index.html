@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit Schedule Canvas v1.3.5</title>
+<title>Unit Schedule Canvas v1.3.6</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; color: #1e293b; }
   .version-tag { position: fixed; top: 10px; right: 10px; font-size: 10px; color: #94a3b8; font-weight: bold; background: white; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0; z-index: 1000; }
@@ -49,7 +49,7 @@
 </head>
 <body>
 
-<div class="version-tag">v1.3.5</div>
+<div class="version-tag">v1.3.6</div>
 
 <div class="header-container">
   <div class="top-row">
@@ -58,7 +58,7 @@
     <button class="action-btn" style="color: #f97316" onclick="refineData()">Clear Picks</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Factory Reset</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Fixed:</strong> Weekend Quota Bypass. <strong>Rule:</strong> Max 7 shifts per rolling 2-weeks.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Fixed:</strong> Strict Rolling Quota. <strong>Rule:</strong> No more than 7 shifts in <i>any</i> 14-day span.</p>
 </div>
 
 <span class="active-label" id="statusLabel">SELECT NURSE TO BEGIN</span>
@@ -180,14 +180,12 @@ function handleAction(el) {
 
   if (owner !== "") return toast(`❌ Taken by ${owner}.`);
 
-  // Max 20 Check
-  if (shiftsData.filter(s => s.name === currentUser).length >= 20) return toast("❌ Max 20 shifts reached.");
+  if (shiftsData.filter(s => s.name === currentUser).length >= 20) return toast("❌ Max 20 shifts total.");
 
   if (isWeekend) {
-      // VALIDATE ENTIRE WINDOW FOR BOTH DAYS
-      // We look for any 14-day window where adding these 2 shifts would result in > 7
-      if (checkProjectedTwoWeekLimit(date, otherDayStr)) {
-          return toast("❌ Error: Weekend pair exceeds 7-shift limit in a 2-week window.");
+      // PRE-VALIDATE ENTIRE ROLLING 14-DAY RANGE
+      if (isRollingViolation(date, otherDayStr)) {
+          return toast("❌ Error: Exceeds 7 shifts in a 14-day rolling window.");
       }
       
       if (checkWeekendStreak(date)) return;
@@ -208,7 +206,7 @@ function handleAction(el) {
           pickShiftWithGravity(date, slotName);
       }
   } else {
-      if (checkTwoWeekLimit(date, 1)) return toast("❌ Exceeds 7-shift limit in 2-week window.");
+      if (isRollingViolation(date)) return toast("❌ Exceeds 7 shifts in a 14-day rolling window.");
       removeShiftByDate(date);
       pickShiftWithGravity(date, slotName);
   }
@@ -217,47 +215,36 @@ function handleAction(el) {
 }
 
 /**
- * Checks if adding TWO weekend shifts would violate the 7-shift window rule
+ * Robust Rolling 14-Day Quota Engine
+ * Checks every possible 14-day window containing the new shift(s).
  */
-function checkProjectedTwoWeekLimit(d1, d2) {
-    const dates = [d1, d2].sort();
-    // A 2-week window is rolling. We check all windows containing these dates.
-    // Simplest: Check 7 days before d1 to 7 days after d2.
-    const startRange = new Date(new Date(dates[0].replace(/-/g, '/')).getTime() - (7 * 86400000));
-    const endRange = new Date(new Date(dates[1].replace(/-/g, '/')).getTime() + (7 * 86400000));
+function isRollingViolation(d1, d2 = null) {
+    const newDates = [d1];
+    if (d2) newDates.push(d2);
     
-    const context = shiftsData.filter(s => s.name === currentUser);
-
-    // Slide a 14-day window across the range
-    for (let i = 0; i <= 14; i++) {
-        const windowStart = new Date(startRange.getTime() + (i * 86400000));
-        const windowEnd = new Date(windowStart.getTime() + (14 * 86400000));
+    const userPicks = shiftsData.filter(s => s.name === currentUser).map(s => s.date);
+    
+    // Test windows around the new dates
+    for (const targetDate of newDates) {
+        const targetTime = new Date(targetDate.replace(/-/g, '/')).getTime();
         
-        const existingInWindow = context.filter(s => {
-            const sd = new Date(s.date.replace(/-/g, '/'));
-            return sd >= windowStart && sd <= windowEnd && s.date !== d1 && s.date !== d2;
-        }).length;
+        // Scan windows starting from 13 days before this shift up to the day of the shift
+        for (let i = 0; i <= 13; i++) {
+            const windowStart = targetTime - (i * 86400000);
+            const windowEnd = windowStart + (13 * 86400000); // 13 more days = 14 total
+            
+            // Count how many current picks fall in this window
+            let count = userPicks.filter(p => {
+                const pt = new Date(p.replace(/-/g, '/')).getTime();
+                // Exclude the slots we are about to fill (d1/d2) to avoid double counting
+                return pt >= windowStart && pt <= windowEnd && p !== d1 && p !== d2;
+            }).length;
 
-        if (existingInWindow + 2 > 7) return true;
-    }
-    return false;
-}
+            // Add the new ones we want to pick
+            count += newDates.length;
 
-function checkTwoWeekLimit(targetDate, adding) {
-    const target = new Date(targetDate.replace(/-/g, '/'));
-    const context = shiftsData.filter(s => s.name === currentUser);
-
-    // Check all possible 14-day windows that contain the target date
-    for (let offset = -14; offset <= 0; offset++) {
-        const windowStart = new Date(target.getTime() + (offset * 86400000));
-        const windowEnd = new Date(windowStart.getTime() + (14 * 86400000));
-
-        const count = context.filter(s => {
-            const sd = new Date(s.date.replace(/-/g, '/'));
-            return sd >= windowStart && sd <= windowEnd && s.date !== targetDate;
-        }).length;
-
-        if (count + adding > 7) return true;
+            if (count > 7) return true;
+        }
     }
     return false;
 }
