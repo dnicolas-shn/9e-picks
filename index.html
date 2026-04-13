@@ -53,7 +53,7 @@
     <button class="action-btn" style="color: #ef4444" onclick="resetApp()">Reset</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Clear Cache</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Rule:</strong> Weekends (Sat/Sun) must be picked as a pair. One click fills/clears both.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Weekend Rule:</strong> Sat/Sun must be picked as a pair, but you can click a different type to switch just one day.</p>
 </div>
 
 <span class="active-label" id="statusLabel">NO ACTIVE NURSE - SELECT NAME BELOW</span>
@@ -105,7 +105,7 @@ function buildCalendar() {
   const start = new Date(START_DATE.replace(/-/g, '/'));
   for (let i = 0; i < DAYS_COUNT; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
-    const dayOfWeek = dt.getDay(); // 0=Sun, 6=Sat
+    const dayOfWeek = dt.getDay(); 
     const ds = dt.toISOString().split('T')[0];
     const cell = document.createElement("div");
     cell.className = "day" + (dayOfWeek === 0 || dayOfWeek === 6 ? " is-weekend" : "");
@@ -134,7 +134,6 @@ function handleAction(el) {
   // 1. REMOVE LOGIC
   if (owner === currentUser) {
     if (isWeekend) {
-        // Remove both Saturday and Sunday
         removeShift(date);
         removeShift(otherWeekendDay);
     } else {
@@ -149,25 +148,40 @@ function handleAction(el) {
 
   // 3. WEEKEND PAIR LOGIC
   if (isWeekend) {
-      // Check if user already has a shift on either day of the weekend
-      const hasSat = shiftsData.find(s => s.name === currentUser && s.date === (dayOfWeek === 6 ? date : otherWeekendDay));
-      const hasSun = shiftsData.find(s => s.name === currentUser && s.date === (dayOfWeek === 0 ? date : otherWeekendDay));
+      const existingOnThisDay = shiftsData.find(s => s.name === currentUser && s.date === date);
+      const otherDayPick = shiftsData.find(s => s.name === currentUser && s.date === otherWeekendDay);
 
-      if (hasSat || hasSun) return toast("❌ Weekend already picked. Clear it first to switch.");
-
-      // Try to pick both
-      const success1 = pickShift(date, slotName);
-      if (success1) {
-          const success2 = pickShift(otherWeekendDay, slotName); // Default same type for auto-pick
-          if (!success2) {
-              // Rollback if partner day is full
-              removeShift(date);
-              toast("❌ Partner weekend day is full!");
+      // If user clicks a different type on a day they ALREADY own (Switching type)
+      if (existingOnThisDay) {
+          removeShift(date);
+          const success = pickShift(date, slotName);
+          if (!success) {
+               // Rollback if switch fails constraints
+               pickShift(date, existingOnThisDay.slotName);
+          }
+      } 
+      // If user owns neither day yet (New Weekend Pick)
+      else if (!otherDayPick) {
+          const success1 = pickShift(date, slotName);
+          if (success1) {
+              const success2 = pickShift(otherWeekendDay, slotName); 
+              if (!success2) {
+                  removeShift(date);
+                  toast("❌ Partner day is full or violates rules!");
+              }
           }
       }
+      // If user owns the OTHER day but not this one (Completing a pair - should be rare with auto-fill)
+      else {
+          pickShift(date, slotName);
+      }
   } else {
-      // STANDARD DAY PICK
-      pickShift(date, slotName);
+      // STANDARD DAY PICK / SWITCH
+      const existing = shiftsData.find(s => s.name === currentUser && s.date === date);
+      if (existing) removeShift(date);
+      
+      const success = pickShift(date, slotName);
+      if (!success && existing) pickShift(date, existing.slotName); // Rollback
   }
 
   saveAndRefresh();
@@ -182,19 +196,21 @@ function removeShift(dateStr) {
 }
 
 function pickShift(dateStr, preferredType) {
-    const existing = shiftsData.find(s => s.name === currentUser && s.date === dateStr);
-    if (existing) return false;
-
-    // Gravity Logic: Find top slot of preferred type, or any slot of that type
+    // Determine top-most available slot for gravity filling
     const available = Array.from(document.querySelectorAll(`.slot[data-date="${dateStr}"][data-slot-name="${preferredType}"]`))
         .find(s => s.dataset.owner === "");
 
-    if (!available) return false;
+    if (!available) {
+        toast(`❌ No ${preferredType} slots available.`);
+        return false;
+    }
 
-    // Constraint Checks
-    if (preferredType !== "Night" && checkNightTurnaround(dateStr)) return false;
-    if (checkTypeLimit(dateStr, preferredType)) return false;
-    if (checkGlobalLimit(dateStr)) return false;
+    // Context for constraint checking (don't count the shift we're about to add)
+    const context = [...shiftsData];
+
+    if (preferredType !== "Night" && checkNightTurnaround(dateStr, context)) return false;
+    if (checkTypeLimit(dateStr, preferredType, context)) return false;
+    if (checkGlobalLimit(dateStr, context)) return false;
 
     applyUI(dateStr, available.dataset.slotId, preferredType, currentUser, true);
     shiftsData.push({ date: dateStr, slotId: available.dataset.slotId, slotName: preferredType, name: currentUser });
@@ -207,32 +223,32 @@ function saveAndRefresh() {
 }
 
 // CONSTRAINTS
-function checkNightTurnaround(dateStr) {
+function checkNightTurnaround(dateStr, context) {
     const prevDate = getOffsetDate(new Date(dateStr.replace(/-/g, '/')), -1);
-    const hit = shiftsData.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
-    if (hit) toast("❌ Cannot pick Day after Night shift.");
+    const hit = context.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
+    if (hit) toast("❌ Forbidden: Day shift after Night shift.");
     return hit;
 }
 
-function checkGlobalLimit(dateStr) {
-    const hasShiftOn = (d) => shiftsData.some(s => s.name === currentUser && s.date === d);
+function checkGlobalLimit(dateStr, context) {
+    const hasShiftOn = (d) => context.some(s => s.name === currentUser && s.date === d);
     const date = new Date(dateStr.replace(/-/g, '/'));
     const offsets = [[-1,-2,-3,-4], [-1,-2,-3,+1], [-1,-2,+1,+2], [-1,+1,+2,+3], [+1,+2,+3,+4]];
     const hit = offsets.some(set => set.every(o => hasShiftOn(getOffsetDate(date, o))));
-    if (hit) toast("❌ Max 4 shifts in a row.");
+    if (hit) toast("❌ Forbidden: Max 4 shifts in a row.");
     return hit;
 }
 
-function checkTypeLimit(dateStr, type) {
+function checkTypeLimit(dateStr, type, context) {
     const isN = (type === "Night");
-    const hasGroupOn = (d) => shiftsData.some(s => {
+    const hasGroupOn = (d) => context.some(s => {
         if (s.name !== currentUser || s.date !== d) return false;
         return isN ? (s.slotName === "Night") : (s.slotName !== "Night");
     });
     const date = new Date(dateStr.replace(/-/g, '/'));
     const offsets = [[-1,-2,-3], [-1,-2,+1], [-1,+1,+2], [+1,+2,+3]];
     const hit = offsets.some(set => set.every(o => hasGroupOn(getOffsetDate(date, o))));
-    if (hit) toast(`❌ Max 3 consecutive ${type}s.`);
+    if (hit) toast(`❌ Forbidden: Max 3 consecutive ${type}s.`);
     return hit;
 }
 
