@@ -23,6 +23,7 @@
   
   .day { border: 1px solid #ddd; padding: 8px; border-radius: 8px; min-height: 200px; display: flex; flex-direction: column; background: white; }
   .date-title { font-weight:bold; font-size:14px; color: #333; margin-bottom: 4px; border-bottom:1px solid #eee; padding-bottom:4px; }
+  .day.is-weekend { background: #fefce8; border-color: #fef08a; }
   
   .slot { border:1px solid #eee; padding:6px; background:#f8f9fa; margin-bottom:5px; border-radius:4px; cursor:pointer; font-size:11px; transition: 0.2s; height: 28px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; user-select: none; }
   .slot.filled { background:#cbd5e1; color:#334155; border-color:#94a3b8; cursor: not-allowed; }
@@ -52,7 +53,7 @@
     <button class="action-btn" style="color: #ef4444" onclick="resetApp()">Reset</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Clear Cache</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;">Click a name to act as that nurse. Click again to sign off. Single click slots to pick/switch.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Rule:</strong> Weekends (Sat/Sun) must be picked as a pair. One click fills/clears both.</p>
 </div>
 
 <span class="active-label" id="statusLabel">NO ACTIVE NURSE - SELECT NAME BELOW</span>
@@ -104,9 +105,10 @@ function buildCalendar() {
   const start = new Date(START_DATE.replace(/-/g, '/'));
   for (let i = 0; i < DAYS_COUNT; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const dayOfWeek = dt.getDay(); // 0=Sun, 6=Sat
     const ds = dt.toISOString().split('T')[0];
     const cell = document.createElement("div");
-    cell.className = "day";
+    cell.className = "day" + (dayOfWeek === 0 || dayOfWeek === 6 ? " is-weekend" : "");
     cell.innerHTML = `<div class="date-title">${dt.toDateString().slice(0, 10)}</div>`;
     SLOTS.forEach((sn, idx) => {
       const el = document.createElement("div");
@@ -122,54 +124,81 @@ function buildCalendar() {
 
 function handleAction(el) {
   if (!currentUser) return toast("Select a nurse name first!", "#1e293b");
-  const { date, slotId, slotName, owner } = el.dataset;
+  const { date, slotName, owner } = el.dataset;
 
-  // 1. UNPICK
+  const dt = new Date(date.replace(/-/g, '/'));
+  const dayOfWeek = dt.getDay();
+  const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+  const otherWeekendDay = (dayOfWeek === 6) ? getOffsetDate(dt, 1) : getOffsetDate(dt, -1);
+
+  // 1. REMOVE LOGIC
   if (owner === currentUser) {
-    applyUI(date, slotId, slotName, currentUser, false);
-    shiftsData = shiftsData.filter(s => !(s.date === date && s.slotId === slotId));
+    if (isWeekend) {
+        // Remove both Saturday and Sunday
+        removeShift(date);
+        removeShift(otherWeekendDay);
+    } else {
+        removeShift(date);
+    }
     saveAndRefresh();
     return;
   }
 
   // 2. BLOCK TAKEN
-  if (owner !== "") {
-    return toast(`❌ Taken by ${owner}.`, "#ef4444");
+  if (owner !== "") return toast(`❌ Taken by ${owner}.`, "#ef4444");
+
+  // 3. WEEKEND PAIR LOGIC
+  if (isWeekend) {
+      // Check if user already has a shift on either day of the weekend
+      const hasSat = shiftsData.find(s => s.name === currentUser && s.date === (dayOfWeek === 6 ? date : otherWeekendDay));
+      const hasSun = shiftsData.find(s => s.name === currentUser && s.date === (dayOfWeek === 0 ? date : otherWeekendDay));
+
+      if (hasSat || hasSun) return toast("❌ Weekend already picked. Clear it first to switch.");
+
+      // Try to pick both
+      const success1 = pickShift(date, slotName);
+      if (success1) {
+          const success2 = pickShift(otherWeekendDay, slotName); // Default same type for auto-pick
+          if (!success2) {
+              // Rollback if partner day is full
+              removeShift(date);
+              toast("❌ Partner weekend day is full!");
+          }
+      }
+  } else {
+      // STANDARD DAY PICK
+      pickShift(date, slotName);
   }
 
-  // 3. AUTO-SWITCH / GRAVITY
-  const existingShiftToday = shiftsData.find(s => s.name === currentUser && s.date === date);
-  let tempShifts = [...shiftsData];
-  if (existingShiftToday) {
-    tempShifts = tempShifts.filter(s => !(s.date === date && s.name === currentUser));
-  }
-
-  const availableSameType = Array.from(document.querySelectorAll(`.slot[data-date="${date}"][data-slot-name="${slotName}"]`))
-      .find(s => s.dataset.owner === "");
-  
-  const targetEl = availableSameType || el;
-  const finalId = targetEl.dataset.slotId;
-  const finalSn = targetEl.dataset.slotName;
-
-  // CONSTRAINTS
-  if (finalSn !== "Night" && checkNightTurnaround(date, tempShifts)) {
-      return toast("❌ Error: Day forbidden after Night shift.");
-  }
-  if (checkTypeLimit(date, finalSn, tempShifts)) {
-      return toast(`❌ Error: Max 3 consecutive ${finalSn}s.`);
-  }
-  if (checkGlobalLimit(date, tempShifts)) {
-      return toast("❌ Error: Max 4 shifts in a row total.");
-  }
-
-  if (existingShiftToday) {
-    applyUI(existingShiftToday.date, existingShiftToday.slotId, existingShiftToday.slotName, currentUser, false);
-    shiftsData = shiftsData.filter(s => !(s.date === date && s.name === currentUser));
-  }
-
-  applyUI(date, finalId, finalSn, currentUser, true);
-  shiftsData.push({ date, slotId: finalId, slotName: finalSn, name: currentUser });
   saveAndRefresh();
+}
+
+function removeShift(dateStr) {
+    const shift = shiftsData.find(s => s.name === currentUser && s.date === dateStr);
+    if (shift) {
+        applyUI(shift.date, shift.slotId, shift.slotName, currentUser, false);
+        shiftsData = shiftsData.filter(s => s !== shift);
+    }
+}
+
+function pickShift(dateStr, preferredType) {
+    const existing = shiftsData.find(s => s.name === currentUser && s.date === dateStr);
+    if (existing) return false;
+
+    // Gravity Logic: Find top slot of preferred type, or any slot of that type
+    const available = Array.from(document.querySelectorAll(`.slot[data-date="${dateStr}"][data-slot-name="${preferredType}"]`))
+        .find(s => s.dataset.owner === "");
+
+    if (!available) return false;
+
+    // Constraint Checks
+    if (preferredType !== "Night" && checkNightTurnaround(dateStr)) return false;
+    if (checkTypeLimit(dateStr, preferredType)) return false;
+    if (checkGlobalLimit(dateStr)) return false;
+
+    applyUI(dateStr, available.dataset.slotId, preferredType, currentUser, true);
+    shiftsData.push({ date: dateStr, slotId: available.dataset.slotId, slotName: preferredType, name: currentUser });
+    return true;
 }
 
 function saveAndRefresh() {
@@ -177,27 +206,34 @@ function saveAndRefresh() {
   updateTables();
 }
 
-function checkNightTurnaround(targetDate, context) {
-    const prevDate = getOffsetDate(new Date(targetDate.replace(/-/g, '/')), -1);
-    return context.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
+// CONSTRAINTS
+function checkNightTurnaround(dateStr) {
+    const prevDate = getOffsetDate(new Date(dateStr.replace(/-/g, '/')), -1);
+    const hit = shiftsData.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
+    if (hit) toast("❌ Cannot pick Day after Night shift.");
+    return hit;
 }
 
-function checkGlobalLimit(targetDate, context) {
-    const hasShiftOn = (dateStr) => context.some(s => s.name === currentUser && s.date === dateStr);
-    const date = new Date(targetDate.replace(/-/g, '/'));
+function checkGlobalLimit(dateStr) {
+    const hasShiftOn = (d) => shiftsData.some(s => s.name === currentUser && s.date === d);
+    const date = new Date(dateStr.replace(/-/g, '/'));
     const offsets = [[-1,-2,-3,-4], [-1,-2,-3,+1], [-1,-2,+1,+2], [-1,+1,+2,+3], [+1,+2,+3,+4]];
-    return offsets.some(set => set.every(o => hasShiftOn(getOffsetDate(date, o))));
+    const hit = offsets.some(set => set.every(o => hasShiftOn(getOffsetDate(date, o))));
+    if (hit) toast("❌ Max 4 shifts in a row.");
+    return hit;
 }
 
-function checkTypeLimit(targetDate, targetSlotName, context) {
-    const isNight = (targetSlotName === "Night");
-    const hasGroupOn = (dateStr) => context.some(s => {
-        if (s.name !== currentUser || s.date !== dateStr) return false;
-        return isNight ? (s.slotName === "Night") : (s.slotName !== "Night");
+function checkTypeLimit(dateStr, type) {
+    const isN = (type === "Night");
+    const hasGroupOn = (d) => shiftsData.some(s => {
+        if (s.name !== currentUser || s.date !== d) return false;
+        return isN ? (s.slotName === "Night") : (s.slotName !== "Night");
     });
-    const date = new Date(targetDate.replace(/-/g, '/'));
+    const date = new Date(dateStr.replace(/-/g, '/'));
     const offsets = [[-1,-2,-3], [-1,-2,+1], [-1,+1,+2], [+1,+2,+3]];
-    return offsets.some(set => set.every(o => hasGroupOn(getOffsetDate(date, o))));
+    const hit = offsets.some(set => set.every(o => hasGroupOn(getOffsetDate(date, o))));
+    if (hit) toast(`❌ Max 3 consecutive ${type}s.`);
+    return hit;
 }
 
 function getOffsetDate(baseDate, offset) {
@@ -226,9 +262,7 @@ function renderNames() {
   const b = document.getElementById("nameBar");
   const regBtn = b.querySelector('.register');
   const label = document.getElementById("statusLabel");
-  
   b.innerHTML = ""; b.appendChild(regBtn);
-  
   staffList.sort().forEach(name => {
     const btn = document.createElement("button");
     btn.className = "name-btn" + (currentUser === name ? " active-user" : "");
@@ -236,7 +270,6 @@ function renderNames() {
     btn.onclick = () => toggleUser(name);
     b.appendChild(btn);
   });
-
   if (currentUser) {
       label.textContent = "ACTIVE NURSE: " + currentUser.toUpperCase();
       label.style.color = "#007bff";
@@ -247,11 +280,7 @@ function renderNames() {
 }
 
 function toggleUser(name) {
-  if (currentUser === name) {
-      currentUser = null; // Sign off
-  } else {
-      currentUser = name; // Sign in / Swap
-  }
+  currentUser = (currentUser === name) ? null : name;
   renderNames();
   document.querySelectorAll('.slot').forEach(el => {
     el.classList.remove("mine");
@@ -264,7 +293,7 @@ function addStaffPrompt() {
     if (n && !staffList.includes(n)) {
         staffList.push(n);
         localStorage.setItem('org_staff', JSON.stringify(staffList));
-        currentUser = n; // Auto-activate new user
+        currentUser = n;
         renderNames();
         updateTables();
     }
@@ -306,14 +335,9 @@ function exportData() {
   a.click();
 }
 
-function refineData() { if(confirm("Clear all picks? Staff list will stay.")) { shiftsData = []; saveAndRefresh(); location.reload(); } }
-function resetApp() { if(confirm("Hard Reset? ALL names and picks will be deleted.")) { localStorage.clear(); location.reload(); } }
-function clearCache() { 
-    if(confirm("Wipe all data and perform Hard Reload?")) {
-        localStorage.clear();
-        window.location.href = window.location.pathname + "?v=" + Math.random();
-    } 
-}
+function refineData() { if(confirm("Clear all picks?")) { shiftsData = []; saveAndRefresh(); location.reload(); } }
+function resetApp() { if(confirm("Hard Reset?")) { localStorage.clear(); location.reload(); } }
+function clearCache() { if(confirm("Wipe all data and reload?")) { localStorage.clear(); window.location.href = window.location.pathname + "?v=" + Math.random(); } }
 
 const toast = (m, bg = "#ef4444") => { const t = document.getElementById("toast"); t.style.background = bg; t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 3500); };
 
