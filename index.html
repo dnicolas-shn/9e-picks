@@ -24,9 +24,9 @@
   .day { border: 1px solid #ddd; padding: 8px; border-radius: 8px; min-height: 200px; display: flex; flex-direction: column; background: white; }
   .date-title { font-weight:bold; font-size:14px; color: #333; margin-bottom: 4px; border-bottom:1px solid #eee; padding-bottom:4px; }
   
-  .slot { border:1px solid #eee; padding:6px; background:#f8f9fa; margin-bottom:5px; border-radius:4px; cursor:pointer; font-size:11px; transition: 0.2s; height: 28px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .slot.filled { background:#cbd5e1; color:#334155; border-color:#94a3b8; cursor:not-allowed; }
-  .slot.filled.mine { background:#007bff; color:white; border-color:#0056b3; }
+  .slot { border:1px solid #eee; padding:6px; background:#f8f9fa; margin-bottom:5px; border-radius:4px; cursor:pointer; font-size:11px; transition: 0.2s; height: 28px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; user-select: none; }
+  .slot.filled { background:#cbd5e1; color:#334155; border-color:#94a3b8; cursor: not-allowed; }
+  .slot.filled.mine { background:#007bff; color:white; border-color:#0056b3; cursor: pointer; }
   
   .modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items: flex-start; justify-content:center; z-index:999; padding-top: 100px; }
   .modal-box { background:white; padding:25px; border-radius:12px; width:90%; max-width:350px; text-align: center; }
@@ -56,6 +56,7 @@
     <button class="action-btn btn-refine" onclick="refineData()">🔄 Refine (Clear Picks)</button>
     <button class="action-btn" style="color: #64748b" onclick="resetApp()">🧹 Factory Reset</button>
   </div>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Interaction:</strong> Double-click to claim, switch, or remove your own shifts.</p>
 </div>
 
 <div class="name-bar" id="nameBar">
@@ -76,7 +77,7 @@
   <div class="data-section">
     <h3>Staff List</h3>
     <table id="staffTable">
-      <thead><tr><th>Name</th><th>Shifts Picked</th></tr></thead>
+      <thead><tr><th>Name</th><th>Shifts</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -132,7 +133,7 @@ function buildCalendar() {
       el.className = "slot";
       el.textContent = sn;
       Object.assign(el.dataset, { date: ds, slotId: `${sn}-${idx}`, slotName: sn, owner: "" });
-      el.onclick = () => handleToggle(el);
+      el.ondblclick = () => handleToggle(el);
       cell.appendChild(el);
     });
     container.appendChild(cell);
@@ -143,30 +144,44 @@ function handleToggle(el) {
   if (!currentUser) { toast("Select a user name first!", "#1e293b"); return; }
   const { date, slotId, slotName, owner } = el.dataset;
   
+  // Rule: Cannot touch someone else's picks
+  if (owner !== "" && owner !== currentUser) {
+    return toast("❌ This slot is owned by " + owner);
+  }
+
+  // Action: Removing own shift
   if (owner === currentUser) {
     applyUI(date, slotId, slotName, currentUser, false);
     shiftsData = shiftsData.filter(s => !(s.date === date && s.slotId === slotId));
-  } else if (owner === "") {
+  } 
+  
+  // Action: Claiming or Switching to an empty slot
+  else {
+    // Determine if we need to "Switch" (remove old shift on same day)
+    const existingShiftOnDay = shiftsData.find(s => s.name === currentUser && s.date === date);
+    let tempShifts = [...shiftsData];
     
-    // RULE 1: Only one slot per calendar date
-    if (shiftsData.some(s => s.name === currentUser && s.date === date)) {
-        return toast("❌ Already have a shift on this date.");
+    if (existingShiftOnDay) {
+        // Remove the existing shift temporarily for constraint checking
+        tempShifts = tempShifts.filter(s => !(s.date === date && s.name === currentUser));
     }
 
-    // RULE 2: Cannot pick Day/Charge after a Night shift
-    if (slotName !== "Night" && checkPreviousShiftWasNight(date)) {
+    // Workflow Constraints
+    if (slotName !== "Night" && checkNightTurnaround(date, tempShifts)) {
         return toast("❌ Error: Cannot pick Day/Charge after a Night shift.");
     }
-
-    // RULE 3: Max 3 of the SAME type in a row (Previous Rule)
-    if (checkTypeLimit(date, slotName)) {
+    if (checkTypeLimit(date, slotName, tempShifts)) {
         const type = (slotName === "Night") ? "Nights" : "Day/Charge shifts";
         return toast(`❌ Error: Max 3 consecutive ${type}.`);
     }
-
-    // RULE 4: Max 4 TOTAL shifts in a row (New Global Rule)
-    if (checkGlobalLimit(date)) {
+    if (checkGlobalLimit(date, tempShifts)) {
         return toast("❌ Error: Max 4 shifts in a row total.");
+    }
+
+    // Apply Switch/Pick
+    if (existingShiftOnDay) {
+        applyUI(existingShiftOnDay.date, existingShiftOnDay.slotId, existingShiftOnDay.slotName, currentUser, false);
+        shiftsData = shiftsData.filter(s => !(s.date === date && s.name === currentUser));
     }
 
     applyUI(date, slotId, slotName, currentUser, true);
@@ -177,50 +192,33 @@ function handleToggle(el) {
   updateTables();
 }
 
-/**
- * Checks if the user had a night shift the day before this one
- */
-function checkPreviousShiftWasNight(targetDate) {
+function checkNightTurnaround(targetDate, contextShifts) {
     const prevDate = getOffsetDate(new Date(targetDate.replace(/-/g, '/')), -1);
-    return shiftsData.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
+    return contextShifts.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
 }
 
-/**
- * Checks for 4 consecutive shifts total (regardless of type)
- */
-function checkGlobalLimit(targetDate) {
-    const hasShiftOn = (dateStr) => shiftsData.some(s => s.name === currentUser && s.date === dateStr);
+function checkGlobalLimit(targetDate, contextShifts) {
+    const hasShiftOn = (dateStr) => contextShifts.some(s => s.name === currentUser && s.date === dateStr);
     const date = new Date(targetDate.replace(/-/g, '/'));
-
-    // Check sequences around target
     if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, -3)) && hasShiftOn(getOffsetDate(date, -4))) return true;
     if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, -3)) && hasShiftOn(getOffsetDate(date, +1))) return true;
     if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2))) return true;
     if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2)) && hasShiftOn(getOffsetDate(date, +3))) return true;
     if (hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2)) && hasShiftOn(getOffsetDate(date, +3)) && hasShiftOn(getOffsetDate(date, +4))) return true;
-
     return false;
 }
 
-/**
- * Checks for 3 consecutive shifts of the SAME type (Night group vs Day group)
- */
-function checkTypeLimit(targetDate, targetSlotName) {
+function checkTypeLimit(targetDate, targetSlotName, contextShifts) {
     const isNightGroup = (targetSlotName === "Night");
-    const hasShiftGroupOn = (dateStr) => {
-        return shiftsData.some(s => {
-            if (s.name !== currentUser || s.date !== dateStr) return false;
-            return isNightGroup ? (s.slotName === "Night") : (s.slotName !== "Night");
-        });
-    };
-
+    const hasGroupOn = (dateStr) => contextShifts.some(s => {
+        if (s.name !== currentUser || s.date !== dateStr) return false;
+        return isNightGroup ? (s.slotName === "Night") : (s.slotName !== "Night");
+    });
     const date = new Date(targetDate.replace(/-/g, '/'));
-
-    if (hasShiftGroupOn(getOffsetDate(date, -1)) && hasShiftGroupOn(getOffsetDate(date, -2)) && hasShiftGroupOn(getOffsetDate(date, -3))) return true;
-    if (hasShiftGroupOn(getOffsetDate(date, -1)) && hasShiftGroupOn(getOffsetDate(date, -2)) && hasShiftGroupOn(getOffsetDate(date, +1))) return true;
-    if (hasShiftGroupOn(getOffsetDate(date, -1)) && hasShiftGroupOn(getOffsetDate(date, +1)) && hasShiftGroupOn(getOffsetDate(date, +2))) return true;
-    if (hasShiftGroupOn(getOffsetDate(date, +1)) && hasShiftGroupOn(getOffsetDate(date, +2)) && hasShiftGroupOn(getOffsetDate(date, +3))) return true;
-
+    if (hasGroupOn(getOffsetDate(date, -1)) && hasGroupOn(getOffsetDate(date, -2)) && hasGroupOn(getOffsetDate(date, -3))) return true;
+    if (hasGroupOn(getOffsetDate(date, -1)) && hasGroupOn(getOffsetDate(date, -2)) && hasGroupOn(getOffsetDate(date, +1))) return true;
+    if (hasGroupOn(getOffsetDate(date, -1)) && hasGroupOn(getOffsetDate(date, +1)) && hasGroupOn(getOffsetDate(date, +2))) return true;
+    if (hasGroupOn(getOffsetDate(date, +1)) && hasGroupOn(getOffsetDate(date, +2)) && hasGroupOn(getOffsetDate(date, +3))) return true;
     return false;
 }
 
@@ -291,7 +289,6 @@ function updateTables() {
     const row = tbody.insertRow();
     row.innerHTML = `<td>${s.date}</td><td>${s.slotName}</td><td>${s.name}</td>`;
   });
-
   const sBody = document.querySelector("#staffTable tbody");
   sBody.innerHTML = "";
   staffList.sort().forEach(name => {
@@ -322,7 +319,7 @@ function exportData() {
 }
 
 function refineData() {
-  if(confirm("This will clear all shift picks but keep the staff names. Proceed?")) {
+  if(confirm("Clear all picks?")) {
     shiftsData = [];
     localStorage.setItem('org_shifts', JSON.stringify(shiftsData));
     location.reload();
@@ -330,7 +327,7 @@ function refineData() {
 }
 
 function resetApp() {
-  if(confirm("DELETE EVERYTHING? (Staff names and shifts will be gone)")) {
+  if(confirm("Factory Reset? (All names and shifts gone)")) {
     localStorage.clear();
     location.reload();
   }
@@ -340,9 +337,7 @@ function logout() { currentUser = null; location.reload(); }
 
 const toast = (m, bg = "#ef4444") => { 
     const t = document.getElementById("toast"); 
-    t.style.background = bg;
-    t.textContent = m; 
-    t.classList.add("show"); 
+    t.style.background = bg; t.textContent = m; t.classList.add("show"); 
     setTimeout(() => t.classList.remove("show"), 3500); 
 };
 
