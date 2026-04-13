@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit Schedule Picks (Dev Mode)</title>
+<title>Unit Schedule Picks (Local Storage)</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; color: #1e293b; }
   .header-container { display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #ddd; padding-bottom: 15px; margin-bottom: 15px; }
@@ -27,16 +27,20 @@
   #nameInput { width:100%; padding:12px; margin-top:15px; border:2px solid #ddd; border-radius:8px; box-sizing:border-box; font-size: 20px; font-weight: 700; text-align: center; color: #007bff; }
   .toast { position: fixed !important; top: 20px !important; left: 50% !important; transform: translateX(-50%) !important; background: rgba(15, 23, 42, 0.95); color: white; padding: 12px 24px; border-radius: 50px; opacity: 0; transition: 0.3s; z-index: 10000; pointer-events: none; font-weight: 600; }
   .toast.show { opacity: 1; top: 30px !important; }
-  .dev-badge { position: fixed; bottom: 10px; right: 10px; background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; z-index: 9999; font-weight: bold; }
+  
+  /* Table Section Styling */
+  .data-section { margin-top: 50px; padding: 20px; background: white; border-radius: 12px; border: 1px solid #ddd; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  th, td { border: 1px solid #eee; padding: 10px; text-align: left; }
+  th { background: #f8f9fa; color: #64748b; }
 </style>
 </head>
 <body>
 
-<div id="devBadge" class="dev-badge" style="display:none;">DEV MODE: OFFLINE</div>
-
 <div class="header-container">
   <div class="top-row">
-    <button class="name-btn" style="font-size: 11px;" onclick="location.reload()">🔄 Force Refresh Data</button>
+    <button class="name-btn" style="font-size: 11px;" onclick="exportData()">💾 Export to CSV</button>
+    <button class="name-btn" style="font-size: 11px; color: red;" onclick="clearAllData()">⚠️ Clear All</button>
   </div>
 </div>
 
@@ -51,8 +55,18 @@
   </div>
 </div>
 
-<h2 id="headerTitle" class="section-header">Connecting to Sheet...</h2>
+<h2 id="headerTitle" class="section-header">Schedule</h2>
 <div class="calendar-wrapper"><div class="calendar" id="calendar"></div></div>
+
+<div class="data-section">
+  <h3>Raw Schedule Table</h3>
+  <table id="dataTable">
+    <thead>
+      <tr><th>Date</th><th>Slot</th><th>Staff Name</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -70,33 +84,13 @@
 </div>
 
 <script>
-// --- DEV SETTINGS ---
-const USE_MOCK_DATA = true; // SET TO FALSE TO USE REAL GOOGLE SHEET
-// --------------------
-
-const STEIN_URL = 'https://api.steinhq.com/v1/storages/69dc5a05bb16885eb7bdc2e5'; 
 const SLOTS = ["Charge", "Day", "Day", "Day", "Night", "Night"];
+const OPT_START = "2024-05-13"; // Hardcoded start date
+const OPT_DAYS = 42;
 
 let currentUser = null;
-let staffList = [];
-let allShiftsData = [];
-let optStartDate = new Date().toISOString().split('T')[0];
-let optDays = 42;
-let userActiveStatus = {};
-let activeLoginName = "";
-let authMode = "login";
-
-// Mock Data for offline development
-const mockData = {
-  Options: [{ start: new Date().toISOString().split('T')[0], days: 42 }],
-  Names: [
-    { name: "Demo Nurse", code: "1234", active: "TRUE" },
-    { name: "Jane Smith", code: "0000", active: "TRUE" }
-  ],
-  Shifts: [
-    { date: new Date().toISOString().split('T')[0], slotId: "Day-1", slotName: "Day", name: "Jane Smith" }
-  ]
-};
+let staffList = JSON.parse(localStorage.getItem('staffList')) || [{name: "Demo Nurse", code: "1234"}];
+let allShiftsData = JSON.parse(localStorage.getItem('shiftsData')) || [];
 
 const toast = m => {
   const t = document.getElementById("toast");
@@ -104,77 +98,19 @@ const toast = m => {
   setTimeout(() => t.classList.remove("show"), 3000);
 };
 
-const sleep = ms => new Promise(res => setTimeout(res, ms));
-
-function normalize(array, mapping) {
-  if (!array || !Array.isArray(array)) return [];
-  return array.map(row => {
-    let clean = {};
-    for (let key in mapping) {
-      const match = Object.keys(row).find(k => mapping[key].includes(k.toLowerCase().trim()));
-      clean[key] = match ? row[match] : "";
-    }
-    return clean;
-  });
-}
-
-async function fetchWithRetry(url, options = {}, retries = 3) {
-  if (USE_MOCK_DATA) {
-    const sheet = url.split('/').pop();
-    return mockData[sheet] || [];
-  }
-  
-  try {
-    const response = await fetch(url, options);
-    if (response.status === 429 && retries > 0) {
-      await sleep(1500);
-      return fetchWithRetry(url, options, retries - 1);
-    }
-    if (!response.ok) throw new Error(response.status);
-    return await response.json();
-  } catch (e) {
-    if (retries > 0) { await sleep(1000); return fetchWithRetry(url, options, retries - 1); }
-    throw e;
-  }
-}
-
-async function init() {
-  const title = document.getElementById("headerTitle");
-  if (USE_MOCK_DATA) document.getElementById("devBadge").style.display = "block";
-  
-  try {
-    const rawOpts = await fetchWithRetry(`${STEIN_URL}/Options`);
-    const rawStaff = await fetchWithRetry(`${STEIN_URL}/Names`);
-    const rawShifts = await fetchWithRetry(`${STEIN_URL}/Shifts`);
-
-    const cleanOpts = normalize(rawOpts, { start: ['start'], days: ['days'] });
-    if (cleanOpts.length > 0 && cleanOpts[0].start) {
-      optStartDate = cleanOpts[0].start;
-      optDays = parseInt(cleanOpts[0].days) || 42;
-    }
-
-    staffList = normalize(rawStaff, { name: ['name'], code: ['code'], active: ['active'] });
-    allShiftsData = normalize(rawShifts, { date: ['date'], slotId: ['slotid'], slotName: ['slotname'], name: ['name'] });
-
-    title.textContent = `Schedule: ${optStartDate}`;
-    renderNames();
-    buildCalendar();
-    
-    allShiftsData.forEach(s => {
-      if(s.date && s.slotId) applyUI(s.date, s.slotId, s.slotName, s.name, true);
-    });
-
-  } catch (err) {
-    title.textContent = "Error Loading Data";
-    toast("Backend Unavailable.");
-  }
+function init() {
+  document.getElementById("headerTitle").textContent = `Schedule Start: ${OPT_START}`;
+  renderNames();
+  buildCalendar();
+  allShiftsData.forEach(s => applyUI(s.date, s.slotId, s.slotName, s.name, true));
+  updateDataTable();
 }
 
 function buildCalendar() {
   const container = document.getElementById("calendar");
   container.innerHTML = "";
-  const start = new Date(optStartDate.replace(/-/g, '/'));
-  for (let i = 0; i < optDays; i++) {
+  const start = new Date(OPT_START.replace(/-/g, '/'));
+  for (let i = 0; i < OPT_DAYS; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const ds = dt.toISOString().split('T')[0];
     const cell = document.createElement("div");
@@ -192,34 +128,21 @@ function buildCalendar() {
   }
 }
 
-async function handleToggle(el) {
+function handleToggle(el) {
   if (!currentUser) return toast("Nurse Login Required");
-  if (userActiveStatus[currentUser] === false) return toast("Awaiting Admin Approval.");
-  
   const { date, slotId, slotName, owner } = el.dataset;
   
   if (owner === currentUser) {
     applyUI(date, slotId, slotName, currentUser, false);
     allShiftsData = allShiftsData.filter(s => !(s.date === date && s.slotId === slotId));
-    if (!USE_MOCK_DATA) {
-      fetch(`${STEIN_URL}/Shifts`, {
-        method: 'DELETE',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ condition: { date, slotId, name: currentUser } })
-      });
-    }
   } else if (owner === "") {
     if (allShiftsData.filter(s => s.name === currentUser).length >= 20) return toast("Limit: 20 shifts.");
     applyUI(date, slotId, slotName, currentUser, true);
     allShiftsData.push({ date, slotId, slotName, name: currentUser });
-    if (!USE_MOCK_DATA) {
-      fetch(`${STEIN_URL}/Shifts`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify([{ date, slotId, slotName, name: currentUser }])
-      });
-    }
   }
+  
+  localStorage.setItem('shiftsData', JSON.stringify(allShiftsData));
+  updateDataTable();
 }
 
 function applyUI(ds, id, sn, name, isAdd) {
@@ -238,13 +161,20 @@ function applyUI(ds, id, sn, name, isAdd) {
   refreshNameCounts();
 }
 
+function updateDataTable() {
+  const tbody = document.querySelector("#dataTable tbody");
+  tbody.innerHTML = "";
+  allShiftsData.sort((a,b) => a.date.localeCompare(b.date)).forEach(s => {
+    const row = tbody.insertRow();
+    row.innerHTML = `<td>${s.date}</td><td>${s.slotName}</td><td>${s.name}</td>`;
+  });
+}
+
 function renderNames() {
   const b = document.getElementById("nameBar");
   const regBtn = b.querySelector('.register');
   b.innerHTML = ""; b.appendChild(regBtn);
   staffList.forEach(u => {
-    if(!u.name) return;
-    userActiveStatus[u.name] = (String(u.active).toUpperCase() === "TRUE");
     const btn = document.createElement("button");
     btn.className="name-btn"; btn.dataset.name = u.name; btn.textContent = u.name;
     btn.onclick=()=>openLogin(u.name);
@@ -269,13 +199,16 @@ function openRegister() {
   clearPin();
 }
 
-async function checkPin() {
+function checkPin() {
   const pin = Array.from(document.querySelectorAll(".pin-boxes input")).map(i => i.value).join("");
   if (pin.length < 4) return;
 
   if (authMode === "register") {
-    toast("Registered (Mock Mode)!");
-    setTimeout(() => location.reload(), 2000);
+    const name = document.getElementById("nameInput").value.trim();
+    if (!name) return toast("Enter Name");
+    staffList.push({name, code: pin});
+    localStorage.setItem('staffList', JSON.stringify(staffList));
+    location.reload();
   } else {
     const user = staffList.find(u => u.name === activeLoginName && String(u.code) === pin);
     if (user) {
@@ -300,9 +233,7 @@ pinInputs.forEach((inp, idx) => {
 
 function refreshNameCounts() {
   const counts = {};
-  document.querySelectorAll('.slot.filled').forEach(el => { 
-    const o = el.dataset.owner; if(o) counts[o] = (counts[o] || 0) + 1; 
-  });
+  allShiftsData.forEach(s => counts[s.name] = (counts[s.name] || 0) + 1);
   document.querySelectorAll('.name-btn:not(.register)').forEach(btn => {
     const n = btn.dataset.name; const c = counts[n] || 0;
     btn.textContent = `${n} (${c}/20)`;
@@ -310,9 +241,21 @@ function refreshNameCounts() {
   });
 }
 
-function clearPin() { pinInputs.forEach(i => i.value = ""); pinInputs[0].focus(); }
+function exportData() {
+  let csv = "Date,Slot,Name\n";
+  allShiftsData.forEach(s => csv += `${s.date},${s.slotName},${s.name}\n`);
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.setAttribute('href', url);
+  a.setAttribute('download', 'schedule.csv');
+  a.click();
+}
+
+function clearAllData() { if(confirm("Clear all picks?")) { localStorage.removeItem('shiftsData'); location.reload(); } }
 function logout() { location.reload(); }
 function cancelAuth() { document.getElementById("authModal").style.display = "none"; }
+function clearPin() { pinInputs.forEach(i => i.value = ""); pinInputs[0].focus(); }
 
 document.addEventListener("DOMContentLoaded", init);
 </script>
