@@ -94,7 +94,7 @@
 
 <div id="authModal" class="modal">
   <div class="modal-box">
-    <h3 id="modalTitle">Add Staff Member</h3>
+    <h3>Add Staff Member</h3>
     <input id="nameInput" placeholder="Enter Full Name" onkeypress="if(event.key==='Enter') saveUser()">
     <button class="name-btn register" style="width:100%" onclick="saveUser()">Add to List</button>
     <button class="action-btn" style="width:100%; margin-top:10px;" onclick="closeModal()">Cancel</button>
@@ -148,18 +148,25 @@ function handleToggle(el) {
     shiftsData = shiftsData.filter(s => !(s.date === date && s.slotId === slotId));
   } else if (owner === "") {
     
-    // CONSTRAINT 1: Only one slot per calendar date
-    const hasShiftToday = shiftsData.some(s => s.name === currentUser && s.date === date);
-    if (hasShiftToday) {
-        toast("❌ Error: You already have a shift on this date.");
-        return;
+    // RULE 1: Only one slot per calendar date
+    if (shiftsData.some(s => s.name === currentUser && s.date === date)) {
+        return toast("❌ Already have a shift on this date.");
     }
 
-    // CONSTRAINT 2: Max 3 in a row
-    if (checkSequenceLimit(date, slotName)) {
+    // RULE 2: Cannot pick Day/Charge after a Night shift
+    if (slotName !== "Night" && checkPreviousShiftWasNight(date)) {
+        return toast("❌ Error: Cannot pick Day/Charge after a Night shift.");
+    }
+
+    // RULE 3: Max 3 of the SAME type in a row (Previous Rule)
+    if (checkTypeLimit(date, slotName)) {
         const type = (slotName === "Night") ? "Nights" : "Day/Charge shifts";
-        toast(`❌ Error: Max 3 ${type} in a row.`);
-        return;
+        return toast(`❌ Error: Max 3 consecutive ${type}.`);
+    }
+
+    // RULE 4: Max 4 TOTAL shifts in a row (New Global Rule)
+    if (checkGlobalLimit(date)) {
+        return toast("❌ Error: Max 4 shifts in a row total.");
     }
 
     applyUI(date, slotId, slotName, currentUser, true);
@@ -171,35 +178,48 @@ function handleToggle(el) {
 }
 
 /**
- * Checks if adding a shift on specific date would exceed 3 in a row of that type.
- * "Charge" and "Day" are treated as the same group for this logic.
+ * Checks if the user had a night shift the day before this one
  */
-function checkSequenceLimit(targetDate, targetSlotName) {
+function checkPreviousShiftWasNight(targetDate) {
+    const prevDate = getOffsetDate(new Date(targetDate.replace(/-/g, '/')), -1);
+    return shiftsData.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
+}
+
+/**
+ * Checks for 4 consecutive shifts total (regardless of type)
+ */
+function checkGlobalLimit(targetDate) {
+    const hasShiftOn = (dateStr) => shiftsData.some(s => s.name === currentUser && s.date === dateStr);
+    const date = new Date(targetDate.replace(/-/g, '/'));
+
+    // Check sequences around target
+    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, -3)) && hasShiftOn(getOffsetDate(date, -4))) return true;
+    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, -3)) && hasShiftOn(getOffsetDate(date, +1))) return true;
+    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2))) return true;
+    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2)) && hasShiftOn(getOffsetDate(date, +3))) return true;
+    if (hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2)) && hasShiftOn(getOffsetDate(date, +3)) && hasShiftOn(getOffsetDate(date, +4))) return true;
+
+    return false;
+}
+
+/**
+ * Checks for 3 consecutive shifts of the SAME type (Night group vs Day group)
+ */
+function checkTypeLimit(targetDate, targetSlotName) {
     const isNightGroup = (targetSlotName === "Night");
-    
-    // Helper to see if a specific date has a shift of the same type group
-    const hasShiftOn = (dateStr) => {
+    const hasShiftGroupOn = (dateStr) => {
         return shiftsData.some(s => {
             if (s.name !== currentUser || s.date !== dateStr) return false;
-            const sIsNight = (s.slotName === "Night");
-            return isNightGroup ? sIsNight : !sIsNight;
+            return isNightGroup ? (s.slotName === "Night") : (s.slotName !== "Night");
         });
     };
 
     const date = new Date(targetDate.replace(/-/g, '/'));
 
-    // Check sequences relative to target date:
-    // Case 1: [T-3, T-2, T-1, (T)]
-    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, -3))) return true;
-    
-    // Case 2: [T-2, T-1, (T), T+1]
-    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, -2)) && hasShiftOn(getOffsetDate(date, +1))) return true;
-    
-    // Case 3: [T-1, (T), T+1, T+2]
-    if (hasShiftOn(getOffsetDate(date, -1)) && hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2))) return true;
-    
-    // Case 4: [(T), T+1, T+2, T+3]
-    if (hasShiftOn(getOffsetDate(date, +1)) && hasShiftOn(getOffsetDate(date, +2)) && hasShiftOn(getOffsetDate(date, +3))) return true;
+    if (hasShiftGroupOn(getOffsetDate(date, -1)) && hasShiftGroupOn(getOffsetDate(date, -2)) && hasShiftGroupOn(getOffsetDate(date, -3))) return true;
+    if (hasShiftGroupOn(getOffsetDate(date, -1)) && hasShiftGroupOn(getOffsetDate(date, -2)) && hasShiftGroupOn(getOffsetDate(date, +1))) return true;
+    if (hasShiftGroupOn(getOffsetDate(date, -1)) && hasShiftGroupOn(getOffsetDate(date, +1)) && hasShiftGroupOn(getOffsetDate(date, +2))) return true;
+    if (hasShiftGroupOn(getOffsetDate(date, +1)) && hasShiftGroupOn(getOffsetDate(date, +2)) && hasShiftGroupOn(getOffsetDate(date, +3))) return true;
 
     return false;
 }
