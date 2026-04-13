@@ -73,9 +73,11 @@ const SLOTS = ["Charge", "Day", "Day", "Day", "Night", "Night"];
 let currentUser = null;
 let staffList = [];
 let allShiftsData = [];
-let optStartDate = new Date().toISOString().split('T')[0]; // Default to today
+let optStartDate = new Date().toISOString().split('T')[0];
 let optDays = 42;
 let userActiveStatus = {};
+let activeLoginName = "";
+let authMode = "login";
 
 const toast = m => {
   const t = document.getElementById("toast");
@@ -83,7 +85,9 @@ const toast = m => {
   setTimeout(() => t.classList.remove("show"), 3000);
 };
 
-// Robust Normalizer
+// Helper: Pause for a specific time
+const sleep = ms => new Promise(res => setTimeout(res, ms));
+
 function normalize(array, mapping) {
   if (!array || !Array.isArray(array)) return [];
   return array.map(row => {
@@ -96,15 +100,24 @@ function normalize(array, mapping) {
   });
 }
 
-// Global Fetch with detailed error reporting
-async function smartFetch(sheetName) {
+// Fixed Fetch: Specifically handles 429 Rate Limiting
+async function fetchWithRetry(url, options = {}, retries = 4, backoff = 1500) {
   try {
-    const res = await fetch(`${STEIN_URL}/${sheetName}`);
-    if (res.status === 404) throw new Error(`Tab "${sheetName}" not found in Google Sheets.`);
-    if (!res.ok) throw new Error(`Stein API Error: ${res.status}`);
-    return await res.json();
+    const response = await fetch(url, options);
+    
+    if (response.status === 429 && retries > 0) {
+      console.warn(`Rate limited. Retrying in ${backoff}ms...`);
+      await sleep(backoff);
+      return fetchWithRetry(url, options, retries - 1, backoff * 2);
+    }
+    
+    if (!response.ok) throw new Error(`Status ${response.status}`);
+    return await response.json();
   } catch (e) {
-    console.error(`Error fetching ${sheetName}:`, e);
+    if (retries > 0) {
+      await sleep(backoff);
+      return fetchWithRetry(url, options, retries - 1, backoff * 2);
+    }
     throw e;
   }
 }
@@ -112,31 +125,34 @@ async function smartFetch(sheetName) {
 async function init() {
   const title = document.getElementById("headerTitle");
   try {
-    // Attempt Parallel Fetch
-    const [rawOpts, rawStaff, rawShifts] = await Promise.all([
-      smartFetch('Options').catch(() => []), // Soft fail for options
-      smartFetch('Names'),
-      smartFetch('Shifts')
-    ]);
+    // 1. Fetch data sequentially with small delays to avoid 429
+    title.textContent = "Loading Config...";
+    const rawOpts = await fetchWithRetry(`${STEIN_URL}/Options`);
+    await sleep(300); // 0.3s pause
+    
+    title.textContent = "Loading Staff...";
+    const rawStaff = await fetchWithRetry(`${STEIN_URL}/Names`);
+    await sleep(300); // 0.3s pause
+    
+    title.textContent = "Loading Shifts...";
+    const rawShifts = await fetchWithRetry(`${STEIN_URL}/Shifts`);
 
-    // 1. Process Options (Safe Fallback)
+    // 2. Process Data
     const cleanOpts = normalize(rawOpts, {
       start: ['startdate', 'start', 'value', 'date'],
-      days: ['days', 'period', 'length']
+      days: ['days', 'period']
     });
     if (cleanOpts.length > 0 && cleanOpts[0].start) {
       optStartDate = cleanOpts[0].start;
       optDays = parseInt(cleanOpts[0].days) || 42;
     }
 
-    // 2. Process Staff
     staffList = normalize(rawStaff, {
-      name: ['name', 'staff', 'full name'],
-      code: ['code', 'pin', 'pass', 'password'],
-      active: ['active', 'status', 'approved']
+      name: ['name', 'staff'],
+      code: ['code', 'pin'],
+      active: ['active', 'status']
     });
 
-    // 3. Process Shifts
     allShiftsData = normalize(rawShifts, {
       date: ['date', 'day'],
       slotId: ['slotid', 'id'],
@@ -144,27 +160,27 @@ async function init() {
       name: ['name', 'staff']
     });
 
+    // 3. Render
     title.textContent = `Schedule: ${optStartDate}`;
     renderNames();
     buildCalendar();
     
-    // 4. Apply existing shifts
     allShiftsData.forEach(s => {
       if(s.date && s.slotId) applyUI(s.date, s.slotId, s.slotName, s.name, true);
     });
 
   } catch (err) {
-    title.textContent = "Connection Error";
-    title.style.color = "red";
-    console.error("Critical Init Failure:", err);
-    toast("Critical Error: " + err.message);
+    title.textContent = "API Busy - Refreshing...";
+    title.style.color = "orange";
+    console.error("Init Failure:", err);
+    // Auto-reload after 5 seconds if we hit a wall
+    setTimeout(() => location.reload(), 5000);
   }
 }
 
 function buildCalendar() {
   const container = document.getElementById("calendar");
   container.innerHTML = "";
-  // Fix date parsing for cross-browser compatibility
   const start = new Date(optStartDate.replace(/-/g, '/'));
   
   for (let i = 0; i < optDays; i++) {
