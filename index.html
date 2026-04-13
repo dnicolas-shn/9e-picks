@@ -52,7 +52,7 @@
     <button class="action-btn" style="color: #ef4444" onclick="resetApp()">Reset</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Clear Cache</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Double-click</strong> to pick, unpick, or swap slots.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Single Click</strong> to pick, switch, or remove your own shifts.</p>
 </div>
 
 <div class="name-bar" id="nameBar">
@@ -120,15 +120,7 @@ function buildCalendar() {
       el.textContent = sn;
       Object.assign(el.dataset, { date: ds, slotId: `${sn}-${idx}`, slotName: sn, owner: "" });
       
-      // SINGLE CLICK: Just gives info if taken
-      el.onclick = () => {
-          if (el.dataset.owner !== "" && el.dataset.owner !== currentUser) {
-              toast(`This slot is picked by ${el.dataset.owner}`, "#1e293b");
-          }
-      };
-
-      // DOUBLE CLICK: Handle all logic
-      el.ondblclick = () => handleAction(el);
+      el.onclick = () => handleAction(el);
       
       cell.appendChild(el);
     });
@@ -150,11 +142,18 @@ function handleAction(el) {
 
   // 2. BLOCK (If clicking someone else's shift)
   if (owner !== "") {
-    return toast(`❌ Double-click only works on empty slots or your own.`, "#ef4444");
+    return toast(`❌ Taken by ${owner}.`, "#ef4444");
   }
 
-  // 3. GRAVITY & PICKING LOGIC
-  // We look for the top-most available slot of the same type on that date
+  // 3. AUTO-SWITCH / GRAVITY LOGIC
+  // If user already has a shift today, unpick it automatically to "switch" slots
+  const existingShiftToday = shiftsData.find(s => s.name === currentUser && s.date === date);
+  let tempShifts = [...shiftsData];
+  if (existingShiftToday) {
+    tempShifts = tempShifts.filter(s => !(s.date === date && s.name === currentUser));
+  }
+
+  // Find "Gravity" slot (Top-most available same type)
   const availableSameType = Array.from(document.querySelectorAll(`.slot[data-date="${date}"][data-slot-name="${slotName}"]`))
       .find(s => s.dataset.owner === "");
   
@@ -162,18 +161,21 @@ function handleAction(el) {
   const finalId = targetEl.dataset.slotId;
   const finalSn = targetEl.dataset.slotName;
 
-  // CONSTRAINTS
-  if (shiftsData.some(s => s.name === currentUser && s.date === date)) {
-      return toast("❌ Already have a shift on this date.");
+  // 4. WORKFLOW CONSTRAINTS
+  if (finalSn !== "Night" && checkNightTurnaround(date, tempShifts)) {
+      return toast("❌ Error: Day forbidden after Night shift.");
   }
-  if (finalSn !== "Night" && checkNightTurnaround(date)) {
-      return toast("❌ Error: Day/Charge forbidden after Night shift.");
-  }
-  if (checkTypeLimit(date, finalSn)) {
+  if (checkTypeLimit(date, finalSn, tempShifts)) {
       return toast(`❌ Error: Max 3 consecutive ${finalSn}s.`);
   }
-  if (checkGlobalLimit(date)) {
+  if (checkGlobalLimit(date, tempShifts)) {
       return toast("❌ Error: Max 4 shifts in a row total.");
+  }
+
+  // If we had a shift today, clear its UI before placing new one
+  if (existingShiftToday) {
+    applyUI(existingShiftToday.date, existingShiftToday.slotId, existingShiftToday.slotName, currentUser, false);
+    shiftsData = shiftsData.filter(s => !(s.date === date && s.name === currentUser));
   }
 
   applyUI(date, finalId, finalSn, currentUser, true);
@@ -186,21 +188,21 @@ function saveAndRefresh() {
   updateTables();
 }
 
-function checkNightTurnaround(targetDate) {
+function checkNightTurnaround(targetDate, context) {
     const prevDate = getOffsetDate(new Date(targetDate.replace(/-/g, '/')), -1);
-    return shiftsData.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
+    return context.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
 }
 
-function checkGlobalLimit(targetDate) {
-    const hasShiftOn = (dateStr) => shiftsData.some(s => s.name === currentUser && s.date === dateStr);
+function checkGlobalLimit(targetDate, context) {
+    const hasShiftOn = (dateStr) => context.some(s => s.name === currentUser && s.date === dateStr);
     const date = new Date(targetDate.replace(/-/g, '/'));
     const offsets = [[-1,-2,-3,-4], [-1,-2,-3,+1], [-1,-2,+1,+2], [-1,+1,+2,+3], [+1,+2,+3,+4]];
     return offsets.some(set => set.every(o => hasShiftOn(getOffsetDate(date, o))));
 }
 
-function checkTypeLimit(targetDate, targetSlotName) {
+function checkTypeLimit(targetDate, targetSlotName, context) {
     const isNight = (targetSlotName === "Night");
-    const hasGroupOn = (dateStr) => shiftsData.some(s => {
+    const hasGroupOn = (dateStr) => context.some(s => {
         if (s.name !== currentUser || s.date !== dateStr) return false;
         return isNight ? (s.slotName === "Night") : (s.slotName !== "Night");
     });
@@ -303,7 +305,14 @@ function exportData() {
 
 function refineData() { if(confirm("Clear all picks? Staff list will stay.")) { shiftsData = []; saveAndRefresh(); location.reload(); } }
 function resetApp() { if(confirm("Hard Reset? ALL names and picks will be deleted.")) { localStorage.clear(); location.reload(); } }
-function clearCache() { if(confirm("Clear storage and force reload?")) { localStorage.clear(); location.reload(); } }
+
+function clearCache() { 
+    if(confirm("Wipe all data and perform Hard Reload?")) {
+        localStorage.clear();
+        // The most aggressive way to clear cache: append a random string to the URL
+        window.location.href = window.location.pathname + "?v=" + Math.random();
+    } 
+}
 
 function logout() { currentUser = null; location.reload(); }
 const toast = (m, bg = "#ef4444") => { const t = document.getElementById("toast"); t.style.background = bg; t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 3500); };
