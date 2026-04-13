@@ -73,120 +73,112 @@ const SLOTS = ["Charge", "Day", "Day", "Day", "Night", "Night"];
 let currentUser = null;
 let staffList = [];
 let allShiftsData = [];
-let optStartDate = "";
+let optStartDate = new Date().toISOString().split('T')[0]; // Default to today
 let optDays = 42;
-let authMode = "login";
-let activeLoginName = "";
 let userActiveStatus = {};
 
 const toast = m => {
   const t = document.getElementById("toast");
   t.textContent = m; t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 3500);
+  setTimeout(() => t.classList.remove("show"), 3000);
 };
 
+// Robust Normalizer
 function normalize(array, mapping) {
   if (!array || !Array.isArray(array)) return [];
   return array.map(row => {
     let clean = {};
     for (let key in mapping) {
       const match = Object.keys(row).find(k => mapping[key].includes(k.toLowerCase().trim()));
-      clean[key] = match ? row[match] : null;
+      clean[key] = match ? row[match] : "";
     }
     return clean;
   });
 }
 
-async function fetchWithRetry(url, options = {}, retries = 2) {
+// Global Fetch with detailed error reporting
+async function smartFetch(sheetName) {
   try {
-    const response = await fetch(url, options);
-    if (response.status === 429 && retries > 0) {
-      await new Promise(res => setTimeout(res, 2000)); 
-      return fetchWithRetry(url, options, retries - 1);
-    }
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response;
+    const res = await fetch(`${STEIN_URL}/${sheetName}`);
+    if (res.status === 404) throw new Error(`Tab "${sheetName}" not found in Google Sheets.`);
+    if (!res.ok) throw new Error(`Stein API Error: ${res.status}`);
+    return await res.json();
   } catch (e) {
-    if (retries > 0) return fetchWithRetry(url, options, retries - 1);
+    console.error(`Error fetching ${sheetName}:`, e);
     throw e;
   }
 }
 
 async function init() {
+  const title = document.getElementById("headerTitle");
   try {
-    // 1. Fetch data
-    const [optR, staffR, shiftR] = await Promise.all([
-      fetchWithRetry(`${STEIN_URL}/Options`),
-      fetchWithRetry(`${STEIN_URL}/Names`),
-      fetchWithRetry(`${STEIN_URL}/Shifts`)
+    // Attempt Parallel Fetch
+    const [rawOpts, rawStaff, rawShifts] = await Promise.all([
+      smartFetch('Options').catch(() => []), // Soft fail for options
+      smartFetch('Names'),
+      smartFetch('Shifts')
     ]);
 
-    const optsRaw = await optR.json();
-    const staffRaw = await staffR.json();
-    const shiftRaw = await shiftR.json();
-
-    // 2. Normalize Options
-    const cleanOpts = normalize(optsRaw, {
+    // 1. Process Options (Safe Fallback)
+    const cleanOpts = normalize(rawOpts, {
       start: ['startdate', 'start', 'value', 'date'],
-      days: ['days', 'period', 'period (days)']
+      days: ['days', 'period', 'length']
     });
-
     if (cleanOpts.length > 0 && cleanOpts[0].start) {
-        optStartDate = cleanOpts[0].start;
-        optDays = parseInt(cleanOpts[0].days || 42);
-    } else {
-        // Fallback if Options sheet is empty
-        optStartDate = new Date().toISOString().split('T')[0];
-        console.warn("Options sheet empty, using today's date.");
+      optStartDate = cleanOpts[0].start;
+      optDays = parseInt(cleanOpts[0].days) || 42;
     }
 
-    // 3. Normalize Staff & Shifts
-    staffList = normalize(staffRaw, {
+    // 2. Process Staff
+    staffList = normalize(rawStaff, {
       name: ['name', 'staff', 'full name'],
-      code: ['code', 'pin', 'pass'],
+      code: ['code', 'pin', 'pass', 'password'],
       active: ['active', 'status', 'approved']
     });
 
-    allShiftsData = normalize(shiftRaw, {
+    // 3. Process Shifts
+    allShiftsData = normalize(rawShifts, {
       date: ['date', 'day'],
       slotId: ['slotid', 'id'],
       slotName: ['slotname', 'slot'],
       name: ['name', 'staff']
     });
 
-    // 4. UI Rendering
-    document.getElementById("headerTitle").textContent = `Schedule: ${optStartDate}`;
+    title.textContent = `Schedule: ${optStartDate}`;
     renderNames();
     buildCalendar();
     
-    allShiftsData.forEach(s => { 
-        if(s.date && s.slotId) applyUI(s.date, s.slotId, s.slotName, s.name, true); 
+    // 4. Apply existing shifts
+    allShiftsData.forEach(s => {
+      if(s.date && s.slotId) applyUI(s.date, s.slotId, s.slotName, s.name, true);
     });
 
-  } catch (e) {
-    console.error("Initialization Error:", e);
-    document.getElementById("headerTitle").textContent = "Error Loading Data";
-    toast("Connection error. Check tab names in Google Sheets.");
+  } catch (err) {
+    title.textContent = "Connection Error";
+    title.style.color = "red";
+    console.error("Critical Init Failure:", err);
+    toast("Critical Error: " + err.message);
   }
 }
 
 function buildCalendar() {
   const container = document.getElementById("calendar");
   container.innerHTML = "";
-  const start = new Date(optStartDate.replace(/-/g,'/'));
-  if (isNaN(start.getTime())) return toast("Invalid Start Date in Sheet");
-
+  // Fix date parsing for cross-browser compatibility
+  const start = new Date(optStartDate.replace(/-/g, '/'));
+  
   for (let i = 0; i < optDays; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const ds = dt.toISOString().split('T')[0];
     const cell = document.createElement("div");
     cell.className = "day";
-    cell.innerHTML = `<div class="date-title">${dt.toDateString().slice(0,10)}</div>`;
+    cell.innerHTML = `<div class="date-title">${dt.toDateString().slice(0, 10)}</div>`;
+    
     SLOTS.forEach((sn, idx) => {
       const el = document.createElement("div");
       el.className = "slot";
       el.textContent = sn;
-      Object.assign(el.dataset, {date: ds, slotId: `${sn}-${idx}`, slotName: sn, owner: ""});
+      Object.assign(el.dataset, { date: ds, slotId: `${sn}-${idx}`, slotName: sn, owner: "" });
       el.ondblclick = () => handleToggle(el);
       cell.appendChild(el);
     });
@@ -198,24 +190,26 @@ async function handleToggle(el) {
   if (!currentUser) return toast("Nurse Login Required");
   if (userActiveStatus[currentUser] === false) return toast("Awaiting Admin Approval.");
   
-  const ds = el.dataset.date, id = el.dataset.slotId, sn = el.dataset.slotName;
+  const { date, slotId, slotName, owner } = el.dataset;
   
-  if (el.dataset.owner === currentUser) {
-    applyUI(ds, id, sn, currentUser, false);
-    allShiftsData = allShiftsData.filter(s => !(s.date === ds && s.slotId === id));
-    await fetchWithRetry(`${STEIN_URL}/Shifts`, {
+  if (owner === currentUser) {
+    applyUI(date, slotId, slotName, currentUser, false);
+    allShiftsData = allShiftsData.filter(s => !(s.date === date && s.slotId === slotId));
+    await fetch(`${STEIN_URL}/Shifts`, {
       method: 'DELETE',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ condition: { date: ds, slotId: id, name: currentUser } })
+      body: JSON.stringify({ condition: { date, slotId, name: currentUser } })
     });
-  } else if (el.dataset.owner === "") {
-    if (allShiftsData.filter(s => s.name === currentUser).length >= 20) return toast("Limit: 20 shifts.");
-    applyUI(ds, id, sn, currentUser, true);
-    allShiftsData.push({ date: ds, slotId: id, slotName: sn, name: currentUser });
-    await fetchWithRetry(`${STEIN_URL}/Shifts`, {
+  } else if (owner === "") {
+    const myCount = allShiftsData.filter(s => s.name === currentUser).length;
+    if (myCount >= 20) return toast("Limit: 20 shifts.");
+    
+    applyUI(date, slotId, slotName, currentUser, true);
+    allShiftsData.push({ date, slotId, slotName, name: currentUser });
+    await fetch(`${STEIN_URL}/Shifts`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify([{ date: ds, slotId: id, slotName: sn, name: currentUser }])
+      body: JSON.stringify([{ date, slotId, slotName, name: currentUser }])
     });
   }
 }
@@ -252,18 +246,18 @@ function renderNames() {
 }
 
 function openLogin(name) {
-  authMode = "login"; activeLoginName = name;
   document.getElementById("authTitle").textContent = name;
   document.getElementById("nameInput").style.display = "none";
   document.getElementById("authModal").style.display = "flex";
+  activeLoginName = name; authMode = "login";
   clearPin();
 }
 
 function openRegister() {
-  authMode = "register";
   document.getElementById("authTitle").textContent = "Registration";
   document.getElementById("nameInput").style.display = "block";
   document.getElementById("authModal").style.display = "flex";
+  authMode = "register";
   clearPin();
 }
 
@@ -274,12 +268,12 @@ async function checkPin() {
   if (authMode === "register") {
     const name = document.getElementById("nameInput").value.trim();
     if (!name) return toast("Enter Full Name");
-    await fetchWithRetry(`${STEIN_URL}/Names`, {
+    await fetch(`${STEIN_URL}/Names`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify([{ name: name, code: pin, active: "FALSE" }])
     });
-    toast("Registered! Please await approval.");
+    toast("Registered! Awaiting Admin Approval.");
     setTimeout(() => location.reload(), 2000);
   } else {
     const user = staffList.find(u => u.name === activeLoginName && String(u.code) === pin);
@@ -306,12 +300,10 @@ pinInputs.forEach((inp, idx) => {
 function refreshNameCounts() {
   const counts = {};
   document.querySelectorAll('.slot.filled').forEach(el => { 
-      const owner = el.dataset.owner;
-      if(owner) counts[owner] = (counts[owner] || 0) + 1; 
+    const o = el.dataset.owner; if(o) counts[o] = (counts[o] || 0) + 1; 
   });
   document.querySelectorAll('.name-btn:not(.register)').forEach(btn => {
-    const n = btn.dataset.name;
-    const c = counts[n] || 0;
+    const n = btn.dataset.name; const c = counts[n] || 0;
     btn.textContent = `${n} (${c}/20)`;
     if (c >= 20) btn.classList.add('completed');
   });
