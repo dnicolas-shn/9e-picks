@@ -67,7 +67,6 @@
 </div>
 
 <script>
-// --- CONFIGURATION ---
 const STEIN_URL = 'https://api.steinhq.com/v1/storages/69dc5a05bb16885eb7bdc2e5'; 
 const SLOTS = ["Charge", "Day", "Day", "Day", "Night", "Night"];
 
@@ -83,10 +82,9 @@ let userActiveStatus = {};
 const toast = m => {
   const t = document.getElementById("toast");
   t.textContent = m; t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 2500);
+  setTimeout(() => t.classList.remove("show"), 3500);
 };
 
-// --- DATA NORMALIZER (Ensures headers like "PIN" vs "code" work) ---
 function normalize(array, mapping) {
   if (!array || !Array.isArray(array)) return [];
   return array.map(row => {
@@ -99,19 +97,24 @@ function normalize(array, mapping) {
   });
 }
 
-// --- SMART FETCH (Handles the 429 Rate Limit) ---
 async function fetchWithRetry(url, options = {}, retries = 2) {
-  const response = await fetch(url, options);
-  if (response.status === 429 && retries > 0) {
-    await new Promise(res => setTimeout(res, 1200)); // Wait 1.2 seconds
-    return fetchWithRetry(url, options, retries - 1);
+  try {
+    const response = await fetch(url, options);
+    if (response.status === 429 && retries > 0) {
+      await new Promise(res => setTimeout(res, 2000)); 
+      return fetchWithRetry(url, options, retries - 1);
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response;
+  } catch (e) {
+    if (retries > 0) return fetchWithRetry(url, options, retries - 1);
+    throw e;
   }
-  return response;
 }
 
-// --- INITIALIZATION ---
 async function init() {
   try {
+    // 1. Fetch data
     const [optR, staffR, shiftR] = await Promise.all([
       fetchWithRetry(`${STEIN_URL}/Options`),
       fetchWithRetry(`${STEIN_URL}/Names`),
@@ -119,32 +122,51 @@ async function init() {
     ]);
 
     const optsRaw = await optR.json();
+    const staffRaw = await staffR.json();
+    const shiftRaw = await shiftR.json();
+
+    // 2. Normalize Options
     const cleanOpts = normalize(optsRaw, {
       start: ['startdate', 'start', 'value', 'date'],
       days: ['days', 'period', 'period (days)']
     });
-    optStartDate = cleanOpts[0].start;
-    optDays = parseInt(cleanOpts[0].days || 42);
 
-    staffList = normalize(await staffR.json(), {
+    if (cleanOpts.length > 0 && cleanOpts[0].start) {
+        optStartDate = cleanOpts[0].start;
+        optDays = parseInt(cleanOpts[0].days || 42);
+    } else {
+        // Fallback if Options sheet is empty
+        optStartDate = new Date().toISOString().split('T')[0];
+        console.warn("Options sheet empty, using today's date.");
+    }
+
+    // 3. Normalize Staff & Shifts
+    staffList = normalize(staffRaw, {
       name: ['name', 'staff', 'full name'],
       code: ['code', 'pin', 'pass'],
       active: ['active', 'status', 'approved']
     });
 
-    allShiftsData = normalize(await shiftR.json(), {
+    allShiftsData = normalize(shiftRaw, {
       date: ['date', 'day'],
       slotId: ['slotid', 'id'],
       slotName: ['slotname', 'slot'],
       name: ['name', 'staff']
     });
 
+    // 4. UI Rendering
     document.getElementById("headerTitle").textContent = `Schedule: ${optStartDate}`;
     renderNames();
     buildCalendar();
-    allShiftsData.forEach(s => { if(s.date && s.slotId) applyUI(s.date, s.slotId, s.slotName, s.name, true); });
+    
+    allShiftsData.forEach(s => { 
+        if(s.date && s.slotId) applyUI(s.date, s.slotId, s.slotName, s.name, true); 
+    });
+
   } catch (e) {
-    toast("Connection error. Try refreshing.");
+    console.error("Initialization Error:", e);
+    document.getElementById("headerTitle").textContent = "Error Loading Data";
+    toast("Connection error. Check tab names in Google Sheets.");
   }
 }
 
@@ -152,6 +174,8 @@ function buildCalendar() {
   const container = document.getElementById("calendar");
   container.innerHTML = "";
   const start = new Date(optStartDate.replace(/-/g,'/'));
+  if (isNaN(start.getTime())) return toast("Invalid Start Date in Sheet");
+
   for (let i = 0; i < optDays; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const ds = dt.toISOString().split('T')[0];
@@ -212,18 +236,19 @@ function applyUI(ds, id, sn, name, isAdd) {
   refreshNameCounts();
 }
 
-// --- AUTH ---
 function renderNames() {
   const b = document.getElementById("nameBar");
   const regBtn = b.querySelector('.register');
   b.innerHTML = ""; b.appendChild(regBtn);
   staffList.forEach(u => {
+    if(!u.name) return;
     userActiveStatus[u.name] = (String(u.active).toUpperCase() === "TRUE");
     const btn = document.createElement("button");
     btn.className="name-btn"; btn.dataset.name = u.name; btn.textContent = u.name;
     btn.onclick=()=>openLogin(u.name);
     b.appendChild(btn);
   });
+  refreshNameCounts();
 }
 
 function openLogin(name) {
@@ -280,7 +305,10 @@ pinInputs.forEach((inp, idx) => {
 
 function refreshNameCounts() {
   const counts = {};
-  document.querySelectorAll('.slot.filled').forEach(el => { counts[el.dataset.owner] = (counts[el.dataset.owner] || 0) + 1; });
+  document.querySelectorAll('.slot.filled').forEach(el => { 
+      const owner = el.dataset.owner;
+      if(owner) counts[owner] = (counts[owner] || 0) + 1; 
+  });
   document.querySelectorAll('.name-btn:not(.register)').forEach(btn => {
     const n = btn.dataset.name;
     const c = counts[n] || 0;
