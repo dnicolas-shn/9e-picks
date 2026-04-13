@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit Schedule Canvas v1.3.8</title>
+<title>Unit Schedule Canvas v1.3.9</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; color: #1e293b; }
   .version-tag { position: fixed; top: 10px; right: 10px; font-size: 10px; color: #94a3b8; font-weight: bold; background: white; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0; z-index: 1000; }
@@ -14,7 +14,6 @@
   .name-btn { padding:8px 14px; border:1px solid #ccc; border-radius:20px; background:white; color: #334155; cursor:pointer; transition: 0.2s; font-weight: 500; }
   .name-btn.active-user { background: #007bff; color: white; border-color: #0056b3; box-shadow: 0 0 0 3px rgba(0,123,255,0.3); font-weight: 700; }
   .name-btn.completed { border-style: double; border-width: 3px; border-color: #eab308; background: #fefce8; }
-  .name-btn.register { background:#28a745; color:white; border-color:#28a745; font-weight: 700; }
   
   .active-label { font-size: 12px; color: #007bff; font-weight: bold; margin-bottom: 40px; display: block; }
   
@@ -27,11 +26,20 @@
   }
   
   .day { border: 1px solid #ddd; padding: 8px; border-radius: 8px; min-height: 260px; display: flex; flex-direction: column; background: white; position: relative; }
-  .week-header { position: absolute; top: -42px; left: 0; background: #1e293b; color: white; font-size: 11px; padding: 4px 12px; border-radius: 4px; font-weight: 800; letter-spacing: 0.5px; }
+  .week-header { position: absolute; top: -42px; left: 0; background: #1e293b; color: white; font-size: 11px; padding: 4px 12px; border-radius: 4px; font-weight: 800; }
 
-  .date-title { font-weight:bold; font-size:14px; color: #1e293b; margin-bottom: 8px; border-bottom: 2px solid #f1f5f9; padding-bottom: 4px; }
-  .day.is-weekend { background: #fffbeb; border-color: #fef08a; }
+  .date-title { font-weight:bold; font-size:14px; color: #1e293b; margin-bottom: 8px; border-bottom: 2px solid #f1f5f9; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
   
+  /* Day States */
+  .day.is-weekend { background: #fffbeb; border-color: #fef08a; }
+  .day.is-holiday { background: #fef2f2; border-color: #fecaca; }
+  .day.is-holiday .date-title { color: #dc2626; border-bottom-color: #fee2e2; }
+  
+  /* Badges */
+  .badge { font-size: 9px; padding: 2px 5px; border-radius: 3px; font-weight: bold; text-transform: uppercase; }
+  .holiday-badge { background: #ef4444; color: white; }
+  .lw-badge { background: #3b82f6; color: white; margin-left: 4px; }
+
   .slot { border:1px solid #eee; padding:6px; background:#f8f9fa; margin-bottom:5px; border-radius:4px; cursor:pointer; font-size:11px; transition: 0.1s; height: 28px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; user-select: none; }
   .slot.filled { background:#cbd5e1; color:#334155; border-color:#94a3b8; cursor: not-allowed; }
   .slot.filled.mine { background:#007bff; color:white; border-color:#0056b3; cursor: pointer; }
@@ -49,7 +57,7 @@
 </head>
 <body>
 
-<div class="version-tag">v1.3.8</div>
+<div class="version-tag">v1.3.9</div>
 
 <div class="header-container">
   <div class="top-row">
@@ -58,12 +66,12 @@
     <button class="action-btn" style="color: #f97316" onclick="refineData()">Clear Picks</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Factory Reset</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Fixed:</strong> Weekend Type Swapping at Max Quota. <strong>Blocks:</strong> W1-2, W3-4, W5-6.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Features:</strong> Automated Holiday Detection & Long Weekend Flags.</p>
 </div>
 
 <span class="active-label" id="statusLabel">SELECT NURSE TO BEGIN</span>
 <div class="name-bar" id="nameBar">
-  <button class="name-btn register" onclick="addStaffPrompt()">+ Add Staff</button>
+  <button class="name-btn register" onclick="addStaffPrompt()" style="background:#28a745; color:white; border-color:#28a745; font-weight: 700;">+ Add Staff</button>
 </div>
 
 <div class="calendar-wrapper"><div class="calendar" id="calendar"></div></div>
@@ -91,6 +99,17 @@
 let START_DATE = localStorage.getItem('canvas_start_date') || "2024-05-13"; 
 const DAYS_COUNT = 42;
 
+// --- HOLIDAY DATA (Expand as needed) ---
+const HOLIDAYS = {
+  "2024-05-20": "Victoria Day",
+  "2024-07-01": "Canada Day",
+  "2024-08-05": "Civic Holiday",
+  "2024-09-02": "Labour Day",
+  "2024-10-14": "Thanksgiving",
+  "2024-12-25": "Christmas",
+  "2024-12-26": "Boxing Day"
+};
+
 let currentUser = null;
 let staffList = JSON.parse(localStorage.getItem('org_staff')) || [];
 let shiftsData = JSON.parse(localStorage.getItem('org_shifts')) || [];
@@ -104,24 +123,46 @@ function buildCalendar() {
   container.innerHTML = "";
   const start = new Date(START_DATE.replace(/-/g, '/'));
   
+  // Pre-calculate long weekends for the view
+  const currentRangeDates = [];
+  for(let i=0; i<DAYS_COUNT; i++) {
+      let d = new Date(start); d.setDate(d.getDate() + i);
+      currentRangeDates.push(d.toISOString().split('T')[0]);
+  }
+
   for (let i = 0; i < DAYS_COUNT; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const dayOfWeek = dt.getDay(); 
     const ds = dt.toISOString().split('T')[0];
     const cell = document.createElement("div");
-    cell.className = "day" + (dayOfWeek === 0 || dayOfWeek === 6 ? " is-weekend" : "");
+    
+    // Classes
+    const isHol = HOLIDAYS[ds];
+    let isLW = false;
+    
+    // Long Weekend Logic: If Fri or Mon is a holiday, Sat/Sun are LW
+    if (dayOfWeek === 6) { // Saturday
+        if (HOLIDAYS[getOffsetDate(dt, -1)] || HOLIDAYS[getOffsetDate(dt, 2)]) isLW = true;
+    }
+    if (dayOfWeek === 0) { // Sunday
+        if (HOLIDAYS[getOffsetDate(dt, -2)] || HOLIDAYS[getOffsetDate(dt, 1)]) isLW = true;
+    }
+
+    cell.className = `day ${dayOfWeek === 0 || dayOfWeek === 6 ? 'is-weekend' : ''} ${isHol ? 'is-holiday' : ''}`;
     
     if (dayOfWeek === 1) {
         const weekNum = Math.floor(i / 7) + 1;
-        const weekDiv = document.createElement("div");
-        weekDiv.className = "week-header";
-        weekDiv.textContent = `Week ${weekNum}`;
-        cell.appendChild(weekDiv);
+        cell.innerHTML += `<div class="week-header">Week ${weekNum}</div>`;
     }
-    const titleDiv = document.createElement("div");
-    titleDiv.className = "date-title";
-    titleDiv.textContent = dt.toDateString().slice(0, 10);
-    cell.appendChild(titleDiv);
+
+    let hBadge = isHol ? `<span class="badge holiday-badge">HOL</span>` : "";
+    let lwBadge = isLW ? `<span class="badge lw-badge">Long Wknd</span>` : "";
+    
+    cell.innerHTML += `
+        <div class="date-title">
+            <span>${dt.toDateString().slice(0, 10)}</span>
+            <div>${hBadge}${lwBadge}</div>
+        </div>`;
     
     const fullPattern = [
         {sid: 'Charge-0', sn: 'Charge'}, {sid: 'Day-0', sn: 'Day'}, {sid: 'Day-1', sn: 'Day'},
@@ -171,19 +212,16 @@ function handleAction(el) {
 
   if (owner !== "") return toast(`❌ Taken by ${owner}.`);
   
-  // Total Max 20 Check (excluding today if switching)
   const totalCount = shiftsData.filter(s => s.name === currentUser && s.date !== date).length;
   if (totalCount >= 20) return toast("❌ Max 20 shifts reached.");
 
   if (isWeekend) {
+      let adding = (shiftsData.some(s => s.name === currentUser && (s.date === date || s.date === otherDayStr))) ? 0 : 2;
+      if (checkBlockQuota(date, adding)) return;
+      if (checkWeekendStreak(date)) return;
+
       const existingOnThisDay = shiftsData.find(s => s.name === currentUser && s.date === date);
       const otherDayPick = shiftsData.find(s => s.name === currentUser && s.date === otherDayStr);
-
-      // QUOTA CHECK: Treat weekend as +2 if brand new, or +0 if just swapping type
-      let adding = (existingOnThisDay || otherDayPick) ? 0 : 2;
-      if (checkBlockQuota(date, adding)) return;
-      
-      if (checkWeekendStreak(date)) return;
 
       if (existingOnThisDay) {
           removeShiftByDate(date);
@@ -201,7 +239,6 @@ function handleAction(el) {
       const existingOnThisDay = shiftsData.find(s => s.name === currentUser && s.date === date);
       let adding = existingOnThisDay ? 0 : 1;
       if (checkBlockQuota(date, adding)) return;
-      
       removeShiftByDate(date);
       pickShiftWithGravity(date, slotName);
   }
@@ -214,25 +251,16 @@ function checkBlockQuota(targetDate, adding) {
     const startDt = new Date(START_DATE.replace(/-/g, '/'));
     const dayDiff = Math.floor((dt - startDt) / 86400000);
     const weekNum = Math.floor(dayDiff / 7) + 1;
-    
     const blockIndex = Math.floor((weekNum - 1) / 2);
     const blockStartDay = blockIndex * 14;
     const blockEndDay = blockStartDay + 13;
-
     const blockStartStr = getOffsetDate(startDt, blockStartDay);
     const blockEndStr = getOffsetDate(startDt, blockEndDay);
 
-    // Count shifts in this block, excluding the date being modified
-    const count = shiftsData.filter(s => 
-        s.name === currentUser && 
-        s.date >= blockStartStr && 
-        s.date <= blockEndStr &&
-        s.date !== targetDate
-    ).length;
-
+    const count = shiftsData.filter(s => s.name === currentUser && s.date >= blockStartStr && s.date <= blockEndStr && s.date !== targetDate).length;
     if (count + adding > 7) {
         const labels = ["Weeks 1-2", "Weeks 3-4", "Weeks 5-6"];
-        toast(`❌ Error: Max 7 shifts allowed in ${labels[blockIndex]}.`);
+        toast(`❌ Error: Max 7 shifts in ${labels[blockIndex]}.`);
         return true;
     }
     return false;
@@ -246,7 +274,6 @@ function pickShiftWithGravity(dateStr, type) {
 
     const potentialSids = [0,1,2,3].map(n => `${type}-${n}`);
     const finalSid = potentialSids.find(sid => !existingOnDate.some(s => s.slotId === sid));
-
     if (!finalSid) { toast(`❌ No ${type} slots available.`); return false; }
     shiftsData.push({ date: dateStr, slotId: finalSid, slotName: type, name: currentUser });
     return true;
@@ -348,14 +375,4 @@ function exportData() {
   [...shiftsData].sort((a,b) => a.date.localeCompare(b.date)).forEach(s => csv += `${s.date},${s.slotName},${s.name}\n`);
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.setAttribute('href', url); a.setAttribute('download', `Schedule_Export.csv`); a.click();
-}
-
-function refineData() { if(confirm("Clear all picks?")) { shiftsData = []; saveAndRefresh(); } }
-function clearCache() { if(confirm("Hard Reset?")) { localStorage.clear(); location.reload(); } }
-const toast = (m) => { const t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 3500); };
-
-document.addEventListener("DOMContentLoaded", init);
-</script>
-</body>
-</html>
+  const a = document.createElement('a'); a.setAttribute('href', url);
