@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit Schedule Canvas v1.7.9</title>
+<title>Unit Schedule Canvas v1.8.2</title>
 <style>
   :root {
     --gap-size: 10px;
@@ -13,7 +13,7 @@
     --success: #10b981;
     --holiday-red: #be123c;
     --weekend-amber: #fffbeb;
-    --month-alt: #f8fafc; /* Color for alternating months */
+    --month-alt: #f8fafc;
   }
 
   * { box-sizing: border-box; }
@@ -34,8 +34,11 @@
   .header-container { display: flex; flex-direction: column; gap: 12px; margin-bottom: 10px; }
   .top-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   
+  /* DASHBOARDS */
   .dashboard { display: none; background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 15px; margin-bottom: 10px; gap: 20px; flex-wrap: wrap; }
   .dashboard.active { display: flex; }
+  
+  /* Shared Stat Styles */
   .stat-group { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #f1f5f9; padding-right: 20px; }
   .stat-label { font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
   .stat-value { font-size: 13px; font-weight: 700; }
@@ -50,19 +53,17 @@
   .name-btn.active-user { background: var(--brand-primary); color: white; border-color: var(--brand-primary); }
   body.logged-in .mgmt-btn, body.logged-in .name-btn:not(.active-user) { display: none !important; }
 
-  .calendar-container { padding: 40px 15px 20px 15px; }
-  .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 35px var(--gap-size); min-width: 1000px; }
+  .calendar-container { padding: 45px 15px 20px 15px; }
+  .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 45px var(--gap-size); min-width: 1000px; }
   @media (min-width: 1400px) { .calendar { grid-template-columns: repeat(7, 1fr) var(--period-divider) repeat(7, 1fr); min-width: 100%; } }
   
-  .day { border: 1px solid #cbd5e1; padding: 12px; border-radius: 12px; min-height: 380px; height: auto; display: flex; flex-direction: column; background: white; position: relative; transition: background 0.2s; }
-  
-  /* MONTH COLOR CUES */
+  .day { border: 1px solid #cbd5e1; padding: 12px; border-radius: 12px; min-height: 380px; height: auto; display: flex; flex-direction: column; background: white; position: relative; }
+  .week-label { position: absolute; top: -26px; left: 2px; font-size: 14px; font-weight: 900; color: var(--brand-dark); text-transform: uppercase; }
+
   .day.month-even { background: white; }
   .day.month-odd { background: var(--month-alt); }
   .day.is-weekend.month-even { background: var(--weekend-amber); }
-  .day.is-weekend.month-odd { background: #fff8e6; } /* Slightly darker amber for alt month */
-
-  .week-label { position: absolute; top: -28px; left: 0; font-size: 10px; font-weight: 900; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+  .day.is-weekend.month-odd { background: #fff8e6; }
 
   .date-block { min-height: 55px; margin-bottom: 10px; }
   .badge-row { display: flex; gap: 4px; height: 16px; margin-bottom: 4px; }
@@ -71,8 +72,6 @@
   .badge-lw { background: var(--brand-primary); }
   .date-string { font-weight: 800; font-size: 14px; }
   .holiday-label { font-size: 10px; color: var(--holiday-red); font-weight: 700; margin-top: 2px; }
-
-  .day.is-holiday { border: 2px solid #fecaca; }
 
   .slots-container { flex-grow: 1; display: flex; flex-direction: column; gap: 4px; }
   .slot { border:1px solid #e2e8f0; padding: 6px 10px; background: white; border-radius: 8px; cursor: pointer; font-size: 11px; height: 32px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -93,7 +92,7 @@
 </head>
 <body>
 
-<div class="version-tag">v1.7.9</div>
+<div class="version-tag">v1.8.2</div>
 
 <div class="sticky-wrapper">
     <div class="header-container">
@@ -107,20 +106,29 @@
         </div>
     </div>
 
+    <div id="globalDashboard" class="dashboard">
+        <div class="stat-group">
+            <div class="stat-label">Unit Core Progress</div>
+            <div class="stat-value" id="global-core-val">0/210</div>
+            <div class="stat-sub">Total Shifts Assigned</div>
+        </div>
+        <div class="stat-group" style="border:none">
+            <div class="stat-label">Vacant Core Slots</div>
+            <div class="stat-value" id="global-vacant-val">D: 0 | N: 0 | C: 0</div>
+            <div class="stat-sub">Day / Night / Charge</div>
+        </div>
+    </div>
+
     <div id="userDashboard" class="dashboard">
         <div class="stat-group">
             <div class="stat-label">Your Picks</div>
             <div class="stat-value" id="stat-total">0/20</div>
             <div class="stat-sub" id="stat-blocks">B1:0 | B2:0 | B3:0</div>
         </div>
-        <div class="stat-group">
-            <div class="stat-label">Unit Progress</div>
-            <div class="stat-value" id="stat-core-global">0/210</div>
-            <div class="stat-sub" id="stat-lock-msg">Overflow Locked</div>
-        </div>
         <div class="stat-group" style="border:none">
-            <div class="stat-label">D / N / C</div>
-            <div class="stat-value" id="stat-split">0 / 0 / 0</div>
+            <div class="stat-label">Shift Split</div>
+            <div class="stat-value" id="stat-split">D:0 | N:0 | C:0</div>
+            <div class="stat-sub" id="stat-lock-msg">Overflow Locked</div>
         </div>
     </div>
 
@@ -136,8 +144,6 @@
 <div class="table-section">
     <h3 style="margin: 0; font-size: 16px;">Unit Master List</h3>
     <div class="table-container"><table id="masterTable"><thead><tr><th>Date</th><th>Type</th><th>Staff Name</th></tr></thead><tbody></tbody></table></div>
-    <h3 style="margin: 0; font-size: 16px;">Staff Summary</h3>
-    <div class="table-container"><table id="staffTable"><thead><tr><th>Name</th><th>Total</th><th>D/N/C</th></tr></thead><tbody></tbody></table></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -173,8 +179,6 @@ function buildCalendar() {
     const ds = dt.toISOString().split('T')[0];
     const holName = HOLIDAYS[ds];
     const dayOfWeek = dt.getDay();
-    
-    // Month Color Logic: Check if the month is even or odd (0-11)
     const monthClass = (dt.getMonth() % 2 === 0) ? 'month-even' : 'month-odd';
 
     let isLW = false;
@@ -209,9 +213,9 @@ function buildCalendar() {
             const el = document.createElement("div");
             if (myPick) { el.className = "slot filled mine"; el.textContent = `${type}: ${currentUser}`; el.onclick = () => handleAction({dataset: {date: ds, slotName: type, owner: currentUser}}); } 
             else {
-                const availableSid = [0,1,2,3].map(n => `${type}-${n}`).find(id => !typePicks.some(s => s.slotId === id) && (CORE_IDS.includes(id) || globalUnlocked));
-                if (!availableSid || (typePicks.length >= (type === 'Charge' ? 1 : 4))) { el.className = "slot filled"; el.textContent = `${type}: Full`; } 
-                else { el.className = "slot"; el.textContent = type; Object.assign(el.dataset, { date: ds, slotId: availableSid, slotName: type, owner: "" }); el.onclick = () => handleAction(el); }
+                const sid = [0,1,2,3].map(n => `${type}-${n}`).find(id => !typePicks.some(s => s.slotId === id) && (CORE_IDS.includes(id) || globalUnlocked));
+                if (!sid || (typePicks.length >= (type === 'Charge' ? 1 : 4))) { el.className = "slot filled"; el.textContent = `${type}: Full`; } 
+                else { el.className = "slot"; el.textContent = type; Object.assign(el.dataset, { date: ds, slotId: sid, slotName: type, owner: "" }); el.onclick = () => handleAction(el); }
             }
             slotsDiv.appendChild(el);
         } else {
@@ -269,6 +273,47 @@ function validateShadowState(dates, type) {
     return true;
 }
 
+function updateDashboard() {
+    const gDash = document.getElementById('globalDashboard');
+    const uDash = document.getElementById('userDashboard');
+    const coreFilled = shiftsData.filter(s => CORE_IDS.includes(s.slotId)).length;
+
+    if (!currentUser) {
+        uDash.classList.remove('active');
+        gDash.classList.add('active');
+        document.body.classList.remove('logged-in');
+        
+        // Calculate Global Inventory
+        let cVac = 0, dVac = 0, nVac = 0;
+        const start = new Date(START_DATE.replace(/-/g, '/'));
+        for(let i=0; i<42; i++) {
+            const ds = getOffsetDate(start, i);
+            const dsData = shiftsData.filter(s => s.date === ds);
+            if (!dsData.some(s => s.slotId === 'Charge-0')) cVac++;
+            if (!dsData.some(s => s.slotId === 'Day-0')) dVac++;
+            if (!dsData.some(s => s.slotId === 'Day-1')) dVac++;
+            if (!dsData.some(s => s.slotId === 'Night-0')) nVac++;
+            if (!dsData.some(s => s.slotId === 'Night-1')) nVac++;
+        }
+        document.getElementById('global-core-val').textContent = `${coreFilled}/210`;
+        document.getElementById('global-vacant-val').textContent = `D: ${dVac} | N: ${nVac} | C: ${cVac}`;
+        return;
+    }
+
+    gDash.classList.remove('active');
+    uDash.classList.add('active');
+    document.body.classList.add('logged-in');
+    
+    const my = shiftsData.filter(s => s.name === currentUser);
+    const st = new Date(START_DATE.replace(/-/g, '/'));
+    const getB = (s, e) => my.filter(p => p.date >= getOffsetDate(st, s) && p.date <= getOffsetDate(st, e)).length;
+    
+    document.getElementById('stat-total').textContent = `${my.length}/20`;
+    document.getElementById('stat-blocks').textContent = `B1:${getB(0,13)} | B2:${getB(14,27)} | B3:${getB(28,41)}`;
+    document.getElementById('stat-lock-msg').textContent = coreFilled >= 210 ? "✅ Overflow Unlocked" : "❌ Overflow Locked";
+    document.getElementById('stat-split').textContent = `${my.filter(p=>p.slotName==="Day").length} / ${my.filter(p=>p.slotName==="Night").length} / ${my.filter(p=>p.slotName==="Charge").length}`;
+}
+
 function saveAndRefresh() { localStorage.setItem('org_shifts', JSON.stringify(shiftsData)); buildCalendar(); renderNames(); updateDashboard(); renderTables(); }
 function pickShiftWithGravity(ds, type) { const sid = [0,1,2,3].map(n => `${type}-${n}`).find(id => !shiftsData.filter(s => s.date === ds).some(s => s.slotId === id)); if (sid) shiftsData.push({ date: ds, slotId: sid, slotName: type, name: currentUser }); }
 function removeShiftByDate(ds) { shiftsData = shiftsData.filter(s => !(s.name === currentUser && s.date === ds)); }
@@ -286,34 +331,14 @@ function renderNames() {
 }
 
 function logout() { currentUser = null; document.getElementById('hideOthersToggle').checked = false; document.getElementById('condensedToggle').checked = false; document.body.classList.remove('hide-others'); saveAndRefresh(); }
-function updateDashboard() {
-    const dash = document.getElementById('userDashboard');
-    if (!currentUser) { dash.classList.remove('active'); document.body.classList.remove('logged-in'); return; }
-    dash.classList.add('active'); document.body.classList.add('logged-in');
-    const my = shiftsData.filter(s => s.name === currentUser);
-    const coreFilled = shiftsData.filter(s => CORE_IDS.includes(s.slotId)).length;
-    const st = new Date(START_DATE.replace(/-/g, '/'));
-    const getB = (s, e) => my.filter(p => p.date >= getOffsetDate(st, s) && p.date <= getOffsetDate(st, e)).length;
-    document.getElementById('stat-total').textContent = `${my.length}/20`;
-    document.getElementById('stat-blocks').textContent = `B1:${getB(0,13)} | B2:${getB(14,27)} | B3:${getB(28,41)}`;
-    document.getElementById('stat-core-global').textContent = `${coreFilled}/210`;
-    document.getElementById('stat-lock-msg').textContent = coreFilled >= 210 ? "✅ Overflow Unlocked" : "❌ Overflow Locked";
-    document.getElementById('stat-split').textContent = `${my.filter(p=>p.slotName==="Day").length} / ${my.filter(p=>p.slotName==="Night").length} / ${my.filter(p=>p.slotName==="Charge").length}`;
-}
-
 function renderTables() {
     const masterBody = document.querySelector("#masterTable tbody");
-    const staffBody = document.querySelector("#staffTable tbody");
-    masterBody.innerHTML = ""; staffBody.innerHTML = "";
+    masterBody.innerHTML = "";
     [...shiftsData].sort((a,b) => a.date.localeCompare(b.date)).forEach(s => masterBody.innerHTML += `<tr><td>${s.date}</td><td>${s.slotName}</td><td>${s.name}</td></tr>`);
-    staffList.sort().forEach(n => {
-        const picks = shiftsData.filter(s => s.name === n);
-        staffBody.innerHTML += `<tr><td>${n}</td><td>${picks.length}</td><td>${picks.filter(p=>p.slotName==="Day").length}/${picks.filter(p=>p.slotName==="Night").length}/${picks.filter(p=>p.slotName==="Charge").length}</td></tr>`;
-    });
 }
 
 function addStaffPrompt() { const n = prompt("Name:"); if (n && !staffList.includes(n)) { staffList.push(n); localStorage.setItem('org_staff', JSON.stringify(staffList)); currentUser = n; saveAndRefresh(); } }
-function setStartDate() { const d = prompt("YYYY-MM-DD:", START_DATE); if (d && !isNaN(Date.parse(d))) { START_DATE = d; localStorage.setItem('canvas_start_date', d); location.reload(); } }
+function setStartDate() { const d = prompt("Monday Start (YYYY-MM-DD):", START_DATE); if (d && !isNaN(Date.parse(d))) { START_DATE = d; localStorage.setItem('canvas_start_date', d); location.reload(); } }
 function exportData() { let csv = "Date,Slot,Name\n"; [...shiftsData].sort((a,b) => a.date.localeCompare(b.date)).forEach(s => csv += `${s.date},${s.slotName},${s.name}\n`); const a = document.createElement('a'); a.setAttribute('href', window.URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))); a.setAttribute('download', `Schedule.csv`); a.click(); }
 const toast = (m) => { const t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 3000); };
 window.onresize = () => buildCalendar();
