@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit Schedule Canvas v1.3.7</title>
+<title>Unit Schedule Canvas v1.3.8</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; color: #1e293b; }
   .version-tag { position: fixed; top: 10px; right: 10px; font-size: 10px; color: #94a3b8; font-weight: bold; background: white; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0; z-index: 1000; }
@@ -49,7 +49,7 @@
 </head>
 <body>
 
-<div class="version-tag">v1.3.7</div>
+<div class="version-tag">v1.3.8</div>
 
 <div class="header-container">
   <div class="top-row">
@@ -58,7 +58,7 @@
     <button class="action-btn" style="color: #f97316" onclick="refineData()">Clear Picks</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Factory Reset</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Fixed Quota:</strong> Max 7 shifts in Weeks 1-2, 3-4, and 5-6. Max 20 total.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Fixed:</strong> Weekend Type Swapping at Max Quota. <strong>Blocks:</strong> W1-2, W3-4, W5-6.</p>
 </div>
 
 <span class="active-label" id="statusLabel">SELECT NURSE TO BEGIN</span>
@@ -170,14 +170,20 @@ function handleAction(el) {
   }
 
   if (owner !== "") return toast(`❌ Taken by ${owner}.`);
-  if (shiftsData.filter(s => s.name === currentUser).length >= 20) return toast("❌ Max 20 shifts reached.");
+  
+  // Total Max 20 Check (excluding today if switching)
+  const totalCount = shiftsData.filter(s => s.name === currentUser && s.date !== date).length;
+  if (totalCount >= 20) return toast("❌ Max 20 shifts reached.");
 
   if (isWeekend) {
-      if (checkBlockQuota(date, 2)) return; // Check Week 1-2 etc.
-      if (checkWeekendStreak(date)) return;
-
       const existingOnThisDay = shiftsData.find(s => s.name === currentUser && s.date === date);
       const otherDayPick = shiftsData.find(s => s.name === currentUser && s.date === otherDayStr);
+
+      // QUOTA CHECK: Treat weekend as +2 if brand new, or +0 if just swapping type
+      let adding = (existingOnThisDay || otherDayPick) ? 0 : 2;
+      if (checkBlockQuota(date, adding)) return;
+      
+      if (checkWeekendStreak(date)) return;
 
       if (existingOnThisDay) {
           removeShiftByDate(date);
@@ -192,7 +198,10 @@ function handleAction(el) {
           pickShiftWithGravity(date, slotName);
       }
   } else {
-      if (checkBlockQuota(date, 1)) return;
+      const existingOnThisDay = shiftsData.find(s => s.name === currentUser && s.date === date);
+      let adding = existingOnThisDay ? 0 : 1;
+      if (checkBlockQuota(date, adding)) return;
+      
       removeShiftByDate(date);
       pickShiftWithGravity(date, slotName);
   }
@@ -200,16 +209,12 @@ function handleAction(el) {
   saveAndRefresh();
 }
 
-/**
- * Check Quota based on 2-week blocks (W1-2, W3-4, W5-6)
- */
 function checkBlockQuota(targetDate, adding) {
     const dt = new Date(targetDate.replace(/-/g, '/'));
     const startDt = new Date(START_DATE.replace(/-/g, '/'));
     const dayDiff = Math.floor((dt - startDt) / 86400000);
     const weekNum = Math.floor(dayDiff / 7) + 1;
     
-    // Determine which block (0 = W1-2, 1 = W3-4, 2 = W5-6)
     const blockIndex = Math.floor((weekNum - 1) / 2);
     const blockStartDay = blockIndex * 14;
     const blockEndDay = blockStartDay + 13;
@@ -217,6 +222,7 @@ function checkBlockQuota(targetDate, adding) {
     const blockStartStr = getOffsetDate(startDt, blockStartDay);
     const blockEndStr = getOffsetDate(startDt, blockEndDay);
 
+    // Count shifts in this block, excluding the date being modified
     const count = shiftsData.filter(s => 
         s.name === currentUser && 
         s.date >= blockStartStr && 
