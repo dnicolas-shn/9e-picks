@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit Schedule Canvas v1.8.2</title>
+<title>Unit Schedule Canvas v1.8.3</title>
 <style>
   :root {
     --gap-size: 10px;
@@ -34,11 +34,9 @@
   .header-container { display: flex; flex-direction: column; gap: 12px; margin-bottom: 10px; }
   .top-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   
-  /* DASHBOARDS */
   .dashboard { display: none; background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 15px; margin-bottom: 10px; gap: 20px; flex-wrap: wrap; }
   .dashboard.active { display: flex; }
   
-  /* Shared Stat Styles */
   .stat-group { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #f1f5f9; padding-right: 20px; }
   .stat-label { font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
   .stat-value { font-size: 13px; font-weight: 700; }
@@ -84,7 +82,6 @@
   th { background: #f8fafc; padding: 12px; font-weight: 700; color: #64748b; border-bottom: 1px solid #e2e8f0; }
   td { padding: 12px; border-bottom: 1px solid #f1f5f9; }
 
-  body.hide-others .slot.filled:not(.mine) { visibility: hidden; pointer-events: none; }
   .action-btn { padding: 8px 16px; border-radius: 8px; border: 1px solid #e2e8f0; cursor: pointer; font-weight: 700; background: white; font-size: 12px; }
   .toast { position: fixed; top: 100px; left: 50%; transform: translateX(-50%); background: var(--brand-dark); color: white; padding: 10px 24px; border-radius: 10px; opacity: 0; transition: 0.3s; z-index: 10000; font-weight: 700; }
   .toast.show { opacity: 1; }
@@ -92,7 +89,7 @@
 </head>
 <body>
 
-<div class="version-tag">v1.8.2</div>
+<div class="version-tag">v1.8.3</div>
 
 <div class="sticky-wrapper">
     <div class="header-container">
@@ -106,16 +103,16 @@
         </div>
     </div>
 
-    <div id="globalDashboard" class="dashboard">
+    <div id="globalDashboard" class="dashboard active">
         <div class="stat-group">
             <div class="stat-label">Unit Core Progress</div>
             <div class="stat-value" id="global-core-val">0/210</div>
-            <div class="stat-sub">Total Shifts Assigned</div>
+            <div class="stat-sub">Total Core Assigned</div>
         </div>
         <div class="stat-group" style="border:none">
-            <div class="stat-label">Vacant Core Slots</div>
+            <div class="stat-label">Total Vacant Core</div>
             <div class="stat-value" id="global-vacant-val">D: 0 | N: 0 | C: 0</div>
-            <div class="stat-sub">Day / Night / Charge</div>
+            <div class="stat-sub">Across 6 Weeks</div>
         </div>
     </div>
 
@@ -149,47 +146,88 @@
 <div class="toast" id="toast"></div>
 
 <script>
-let START_DATE = localStorage.getItem('canvas_start_date') || "2024-05-13"; 
-const DAYS_COUNT = 42;
-const CORE_SLOT_COUNT = 210; 
+let START_DATE = localStorage.getItem('canvas_start_date') || "2026-05-11"; 
 const CORE_IDS = ['Charge-0', 'Day-0', 'Day-1', 'Night-0', 'Night-1'];
-const HOLIDAYS = { "2024-05-20": "Victoria Day", "2024-07-01": "Canada Day", "2024-08-05": "Civic Holiday", "2024-09-02": "Labour Day", "2024-10-14": "Thanksgiving", "2024-11-11": "Remembrance Day", "2024-12-25": "Christmas", "2024-12-26": "Boxing Day" };
 
 let currentUser = null;
 let staffList = JSON.parse(localStorage.getItem('org_staff')) || [];
 let shiftsData = JSON.parse(localStorage.getItem('org_shifts')) || [];
+let ACTIVE_HOLIDAYS = {};
 
-function init() { saveAndRefresh(); }
+function generateHolidays(year) {
+    const h = {};
+    const getNthDay = (nth, day, month, yr) => {
+        let d = new Date(yr, month, 1);
+        let count = 0;
+        while (count < nth) {
+            if (d.getDay() === day) count++;
+            if (count < nth) d.setDate(d.getDate() + 1);
+        }
+        return d;
+    };
 
-function isGlobalCoreFull() { return shiftsData.filter(s => CORE_IDS.includes(s.slotId)).length >= CORE_SLOT_COUNT; }
+    const add = (dt, name) => h[dt.toISOString().split('T')[0]] = name;
+
+    add(new Date(year, 0, 1), "New Year's Day");
+    add(getNthDay(3, 1, 1, year), "Family Day");
+    // Simplified Good Friday (approx)
+    add(new Date(year, 3, 3), "Good Friday"); 
+    
+    // Victoria Day (Monday preceding May 25)
+    let vic = new Date(year, 4, 24);
+    while(vic.getDay() !== 1) vic.setDate(vic.getDate() - 1);
+    add(vic, "Victoria Day");
+
+    add(new Date(year, 6, 1), "Canada Day");
+    add(getNthDay(1, 1, 7, year), "Civic Holiday");
+    add(getNthDay(1, 1, 8, year), "Labour Day");
+    add(getNthDay(2, 1, 9, year), "Thanksgiving");
+    add(new Date(year, 10, 11), "Remembrance Day");
+    add(new Date(year, 11, 25), "Christmas Day");
+    add(new Date(year, 11, 26), "Boxing Day");
+
+    return h;
+}
+
+function init() {
+    const startYear = new Date(START_DATE.replace(/-/g, '/')).getFullYear();
+    ACTIVE_HOLIDAYS = {...generateHolidays(startYear), ...generateHolidays(startYear + 1)};
+    saveAndRefresh();
+}
+
+function isGlobalCoreFull() { return shiftsData.filter(s => CORE_IDS.includes(s.slotId)).length >= 210; }
+
+function getOffsetDate(b, o) {
+    const d = new Date(b);
+    d.setDate(d.getDate() + o);
+    return d.toISOString().split('T')[0];
+}
 
 function buildCalendar() {
   const container = document.getElementById("calendar");
   container.innerHTML = "";
   const start = new Date(START_DATE.replace(/-/g, '/'));
   const isLarge = window.innerWidth >= 1400;
-  const isCondensed = document.getElementById('condensedToggle').checked;
+  const isCondensed = document.getElementById('condensedToggle')?.checked;
   const globalUnlocked = isGlobalCoreFull();
 
-  for (let i = 0; i < DAYS_COUNT; i++) {
+  for (let i = 0; i < 42; i++) {
     if (isLarge && i > 0 && i % 7 === 0 && (i / 7) % 2 !== 0) {
         const spacer = document.createElement("div"); spacer.style.width = "24px"; container.appendChild(spacer);
     }
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const ds = dt.toISOString().split('T')[0];
-    const holName = HOLIDAYS[ds];
+    const holName = ACTIVE_HOLIDAYS[ds];
     const dayOfWeek = dt.getDay();
     const monthClass = (dt.getMonth() % 2 === 0) ? 'month-even' : 'month-odd';
 
     let isLW = false;
-    if (dayOfWeek === 6 && (HOLIDAYS[getOffsetDate(dt, -1)] || HOLIDAYS[getOffsetDate(dt, 2)])) isLW = true;
-    if (dayOfWeek === 0 && (HOLIDAYS[getOffsetDate(dt, -2)] || HOLIDAYS[getOffsetDate(dt, 1)])) isLW = true;
+    if (dayOfWeek === 6 && (ACTIVE_HOLIDAYS[getOffsetDate(dt, -1)] || ACTIVE_HOLIDAYS[getOffsetDate(dt, 2)])) isLW = true;
+    if (dayOfWeek === 0 && (ACTIVE_HOLIDAYS[getOffsetDate(dt, -2)] || ACTIVE_HOLIDAYS[getOffsetDate(dt, 1)])) isLW = true;
 
     const cell = document.createElement("div");
     cell.className = `day ${monthClass} ${dayOfWeek === 0 || dayOfWeek === 6 ? 'is-weekend' : ''} ${holName ? 'is-holiday' : ''}`;
-    
-    let labels = "";
-    if (dayOfWeek === 1) labels += `<div class="week-label">Week ${Math.floor(i/7)+1}</div>`;
+    let labels = (dayOfWeek === 1) ? `<div class="week-label">Week ${Math.floor(i/7)+1}</div>` : "";
 
     cell.innerHTML = `
       ${labels}
@@ -247,7 +285,7 @@ function handleAction(el) {
   if (!owner && !CORE_IDS.includes(slotId) && !isGlobalCoreFull()) return toast("❌ Core must be full first.");
   const dt = new Date(date.replace(/-/g, '/'));
   const day = dt.getDay();
-  let set = (HOLIDAYS[date]) ? [getOffsetDate(dt, (day === 1 ? -2 : 1)), getOffsetDate(dt, (day === 1 ? -1 : 2)), date] :
+  let set = (ACTIVE_HOLIDAYS[date]) ? [getOffsetDate(dt, (day === 1 ? -2 : 1)), getOffsetDate(dt, (day === 1 ? -1 : 2)), date] :
             (day === 6 || day === 0) ? [(day === 6) ? date : getOffsetDate(dt, -1), (day === 6) ? getOffsetDate(dt, 1) : date] : [date];
   if (owner === currentUser) { set.forEach(d => removeShiftByDate(d)); saveAndRefresh(); return; }
   if (validateShadowState(set, slotName)) { set.forEach(d => { removeShiftByDate(d); pickShiftWithGravity(d, slotName); }); saveAndRefresh(); }
@@ -277,13 +315,8 @@ function updateDashboard() {
     const gDash = document.getElementById('globalDashboard');
     const uDash = document.getElementById('userDashboard');
     const coreFilled = shiftsData.filter(s => CORE_IDS.includes(s.slotId)).length;
-
     if (!currentUser) {
-        uDash.classList.remove('active');
-        gDash.classList.add('active');
-        document.body.classList.remove('logged-in');
-        
-        // Calculate Global Inventory
+        uDash.classList.remove('active'); gDash.classList.add('active'); document.body.classList.remove('logged-in');
         let cVac = 0, dVac = 0, nVac = 0;
         const start = new Date(START_DATE.replace(/-/g, '/'));
         for(let i=0; i<42; i++) {
@@ -299,15 +332,10 @@ function updateDashboard() {
         document.getElementById('global-vacant-val').textContent = `D: ${dVac} | N: ${nVac} | C: ${cVac}`;
         return;
     }
-
-    gDash.classList.remove('active');
-    uDash.classList.add('active');
-    document.body.classList.add('logged-in');
-    
+    gDash.classList.remove('active'); uDash.classList.add('active'); document.body.classList.add('logged-in');
     const my = shiftsData.filter(s => s.name === currentUser);
     const st = new Date(START_DATE.replace(/-/g, '/'));
     const getB = (s, e) => my.filter(p => p.date >= getOffsetDate(st, s) && p.date <= getOffsetDate(st, e)).length;
-    
     document.getElementById('stat-total').textContent = `${my.length}/20`;
     document.getElementById('stat-blocks').textContent = `B1:${getB(0,13)} | B2:${getB(14,27)} | B3:${getB(28,41)}`;
     document.getElementById('stat-lock-msg').textContent = coreFilled >= 210 ? "✅ Overflow Unlocked" : "❌ Overflow Locked";
@@ -317,7 +345,6 @@ function updateDashboard() {
 function saveAndRefresh() { localStorage.setItem('org_shifts', JSON.stringify(shiftsData)); buildCalendar(); renderNames(); updateDashboard(); renderTables(); }
 function pickShiftWithGravity(ds, type) { const sid = [0,1,2,3].map(n => `${type}-${n}`).find(id => !shiftsData.filter(s => s.date === ds).some(s => s.slotId === id)); if (sid) shiftsData.push({ date: ds, slotId: sid, slotName: type, name: currentUser }); }
 function removeShiftByDate(ds) { shiftsData = shiftsData.filter(s => !(s.name === currentUser && s.date === ds)); }
-function getOffsetDate(b, o) { const d = new Date(b); d.setDate(d.getDate() + o); return d.toISOString().split('T')[0]; }
 
 function renderNames() {
   const b = document.getElementById("nameBar"); b.innerHTML = '<button class="name-btn mgmt-btn" style="background:var(--brand-dark); color:white;" onclick="addStaffPrompt()">+ ADD STAFF</button>';
@@ -338,7 +365,7 @@ function renderTables() {
 }
 
 function addStaffPrompt() { const n = prompt("Name:"); if (n && !staffList.includes(n)) { staffList.push(n); localStorage.setItem('org_staff', JSON.stringify(staffList)); currentUser = n; saveAndRefresh(); } }
-function setStartDate() { const d = prompt("Monday Start (YYYY-MM-DD):", START_DATE); if (d && !isNaN(Date.parse(d))) { START_DATE = d; localStorage.setItem('canvas_start_date', d); location.reload(); } }
+function setStartDate() { const d = prompt("YYYY-MM-DD:", START_DATE); if (d && !isNaN(Date.parse(d))) { START_DATE = d; localStorage.setItem('canvas_start_date', d); location.reload(); } }
 function exportData() { let csv = "Date,Slot,Name\n"; [...shiftsData].sort((a,b) => a.date.localeCompare(b.date)).forEach(s => csv += `${s.date},${s.slotName},${s.name}\n`); const a = document.createElement('a'); a.setAttribute('href', window.URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))); a.setAttribute('download', `Schedule.csv`); a.click(); }
 const toast = (m) => { const t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 3000); };
 window.onresize = () => buildCalendar();
