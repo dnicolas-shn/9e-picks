@@ -52,7 +52,7 @@
     <button class="action-btn" style="color: #ef4444" onclick="resetApp()">Reset</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Clear Cache</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;">Click to pick/unpick. <b>Double-click</b> taken slots to swap them to your name.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Double-click</strong> to pick, unpick, or swap slots.</p>
 </div>
 
 <div class="name-bar" id="nameBar">
@@ -96,7 +96,6 @@ const DAYS_COUNT = 42;
 let currentUser = null;
 let staffList = JSON.parse(localStorage.getItem('org_staff')) || [];
 let shiftsData = JSON.parse(localStorage.getItem('org_shifts')) || [];
-let clickTimer = null; // Used to distinguish between single and double clicks
 
 function init() {
   renderNames();
@@ -121,19 +120,15 @@ function buildCalendar() {
       el.textContent = sn;
       Object.assign(el.dataset, { date: ds, slotId: `${sn}-${idx}`, slotName: sn, owner: "" });
       
-      // Handle Single Click with a delay to check for double click
+      // SINGLE CLICK: Just gives info if taken
       el.onclick = () => {
-          if (clickTimer) {
-              clearTimeout(clickTimer);
-              clickTimer = null;
-              handleAction(el, true); // It's a double click!
-          } else {
-              clickTimer = setTimeout(() => {
-                  handleAction(el, false); // It stayed a single click
-                  clickTimer = null;
-              }, 250);
+          if (el.dataset.owner !== "" && el.dataset.owner !== currentUser) {
+              toast(`This slot is picked by ${el.dataset.owner}`, "#1e293b");
           }
       };
+
+      // DOUBLE CLICK: Handle all logic
+      el.ondblclick = () => handleAction(el);
       
       cell.appendChild(el);
     });
@@ -141,11 +136,11 @@ function buildCalendar() {
   }
 }
 
-function handleAction(el, isCorrection) {
+function handleAction(el) {
   if (!currentUser) return toast("Select a user name first!", "#1e293b");
   const { date, slotId, slotName, owner } = el.dataset;
 
-  // 1. REMOVE OWN
+  // 1. UNPICK (If clicking own shift)
   if (owner === currentUser) {
     applyUI(date, slotId, slotName, currentUser, false);
     shiftsData = shiftsData.filter(s => !(s.date === date && s.slotId === slotId));
@@ -153,19 +148,17 @@ function handleAction(el, isCorrection) {
     return;
   }
 
-  // 2. BLOCK TAKEN (unless double click)
-  if (owner !== "" && !isCorrection) {
-    return toast(`❌ Taken by ${owner}. Double-click to swap.`);
+  // 2. BLOCK (If clicking someone else's shift)
+  if (owner !== "") {
+    return toast(`❌ Double-click only works on empty slots or your own.`, "#ef4444");
   }
 
-  // 3. GRAVITY LOGIC (Top-down filling for single clicks)
-  let targetEl = el;
-  if (!isCorrection) {
-      const availableSameType = Array.from(document.querySelectorAll(`.slot[data-date="${date}"][data-slot-name="${slotName}"]`))
-          .find(s => s.dataset.owner === "");
-      if (availableSameType) targetEl = availableSameType;
-  }
-
+  // 3. GRAVITY & PICKING LOGIC
+  // We look for the top-most available slot of the same type on that date
+  const availableSameType = Array.from(document.querySelectorAll(`.slot[data-date="${date}"][data-slot-name="${slotName}"]`))
+      .find(s => s.dataset.owner === "");
+  
+  const targetEl = availableSameType || el;
   const finalId = targetEl.dataset.slotId;
   const finalSn = targetEl.dataset.slotName;
 
@@ -181,12 +174,6 @@ function handleAction(el, isCorrection) {
   }
   if (checkGlobalLimit(date)) {
       return toast("❌ Error: Max 4 shifts in a row total.");
-  }
-
-  // 4. SWAP (Logic for Correction)
-  if (isCorrection && owner !== "") {
-      // Remove the previous owner
-      shiftsData = shiftsData.filter(s => !(s.date === date && s.slotId === finalId));
   }
 
   applyUI(date, finalId, finalSn, currentUser, true);
@@ -316,12 +303,7 @@ function exportData() {
 
 function refineData() { if(confirm("Clear all picks? Staff list will stay.")) { shiftsData = []; saveAndRefresh(); location.reload(); } }
 function resetApp() { if(confirm("Hard Reset? ALL names and picks will be deleted.")) { localStorage.clear(); location.reload(); } }
-function clearCache() { 
-    if(confirm("Clear LocalStorage and Force Reload?")) {
-        localStorage.clear(); 
-        location.reload(true); 
-    } 
-}
+function clearCache() { if(confirm("Clear storage and force reload?")) { localStorage.clear(); location.reload(); } }
 
 function logout() { currentUser = null; location.reload(); }
 const toast = (m, bg = "#ef4444") => { const t = document.getElementById("toast"); t.style.background = bg; t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 3500); };
