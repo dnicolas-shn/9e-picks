@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit Schedule Canvas v1.3.3</title>
+<title>Unit Schedule Canvas v1.3.5</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; color: #1e293b; }
   .version-tag { position: fixed; top: 10px; right: 10px; font-size: 10px; color: #94a3b8; font-weight: bold; background: white; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0; z-index: 1000; }
@@ -16,20 +16,20 @@
   .name-btn.completed { border-style: double; border-width: 3px; border-color: #eab308; background: #fefce8; }
   .name-btn.register { background:#28a745; color:white; border-color:#28a745; font-weight: 700; }
   
-  .active-label { font-size: 12px; color: #007bff; font-weight: bold; margin-bottom: 35px; display: block; }
+  .active-label { font-size: 12px; color: #007bff; font-weight: bold; margin-bottom: 40px; display: block; }
   
-  .calendar-wrapper { overflow-x: auto; padding-top: 45px; width: 100%; }
-  .calendar { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 65px 10px; min-width: 1000px; }
+  .calendar-wrapper { overflow-x: auto; padding-top: 50px; width: 100%; }
+  .calendar { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 70px 10px; min-width: 1000px; }
 
   @media (min-width: 1400px) { 
     .calendar { grid-template-columns: repeat(14, minmax(110px, 1fr)); min-width: 1650px; column-gap: 10px; }
     .day:nth-child(14n+8) { margin-left: 30px; }
   }
   
-  .day { border: 1px solid #ddd; padding: 8px; border-radius: 8px; min-height: 250px; display: flex; flex-direction: column; background: white; position: relative; }
-  .week-header { position: absolute; top: -40px; left: 0; background: #334155; color: white; font-size: 11px; padding: 4px 12px; border-radius: 4px; font-weight: 800; }
+  .day { border: 1px solid #ddd; padding: 8px; border-radius: 8px; min-height: 260px; display: flex; flex-direction: column; background: white; position: relative; }
+  .week-header { position: absolute; top: -42px; left: 0; background: #1e293b; color: white; font-size: 11px; padding: 4px 12px; border-radius: 4px; font-weight: 800; letter-spacing: 0.5px; }
 
-  .date-title { font-weight:bold; font-size:14px; color: #333; margin-bottom: 6px; border-bottom:1px solid #eee; padding-bottom:4px; }
+  .date-title { font-weight:bold; font-size:14px; color: #1e293b; margin-bottom: 8px; border-bottom: 2px solid #f1f5f9; padding-bottom: 4px; }
   .day.is-weekend { background: #fffbeb; border-color: #fef08a; }
   
   .slot { border:1px solid #eee; padding:6px; background:#f8f9fa; margin-bottom:5px; border-radius:4px; cursor:pointer; font-size:11px; transition: 0.1s; height: 28px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; user-select: none; }
@@ -49,7 +49,7 @@
 </head>
 <body>
 
-<div class="version-tag">v1.3.3</div>
+<div class="version-tag">v1.3.5</div>
 
 <div class="header-container">
   <div class="top-row">
@@ -58,7 +58,7 @@
     <button class="action-btn" style="color: #f97316" onclick="refineData()">Clear Picks</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Factory Reset</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Fixed:</strong> Table-Sync Glitch. <strong>Rules:</strong> Max 7 shifts per 2-weeks. Max 2 weekends in a row.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Fixed:</strong> Weekend Quota Bypass. <strong>Rule:</strong> Max 7 shifts per rolling 2-weeks.</p>
 </div>
 
 <span class="active-label" id="statusLabel">SELECT NURSE TO BEGIN</span>
@@ -90,7 +90,6 @@
 <script>
 let START_DATE = localStorage.getItem('canvas_start_date') || "2024-05-13"; 
 const DAYS_COUNT = 42;
-const MAX_TOTAL_SLOTS = 8; // Max possible slots per day
 
 let currentUser = null;
 let staffList = JSON.parse(localStorage.getItem('org_staff')) || [];
@@ -124,23 +123,21 @@ function buildCalendar() {
     titleDiv.textContent = dt.toDateString().slice(0, 10);
     cell.appendChild(titleDiv);
     
-    // Core Pattern
     const fullPattern = [
         {sid: 'Charge-0', sn: 'Charge'},
         {sid: 'Day-0', sn: 'Day'},
         {sid: 'Day-1', sn: 'Day'},
         {sid: 'Night-0', sn: 'Night'},
         {sid: 'Night-1', sn: 'Night'},
-        {sid: 'Day-2', sn: 'Day'},   // Unlocks @ 5
-        {sid: 'Night-2', sn: 'Night'}, // Unlocks @ 6
-        {sid: 'Day-3', sn: 'Day'}    // Unlocks @ 7
+        {sid: 'Day-2', sn: 'Day'},   
+        {sid: 'Night-2', sn: 'Night'}, 
+        {sid: 'Day-3', sn: 'Day'}    
     ];
 
     const currentShiftsOnDate = shiftsData.filter(s => s.date === ds);
     const countOnDate = currentShiftsOnDate.length;
 
     fullPattern.forEach((config, idx) => {
-      // Logic for unlocking slots visually
       if (idx === 5 && countOnDate < 5 && !currentShiftsOnDate.some(s => s.slotId === config.sid)) return;
       if (idx === 6 && countOnDate < 6 && !currentShiftsOnDate.some(s => s.slotId === config.sid)) return;
       if (idx === 7 && countOnDate < 7 && !currentShiftsOnDate.some(s => s.slotId === config.sid)) return;
@@ -163,14 +160,13 @@ function buildCalendar() {
 
 function handleAction(el) {
   if (!currentUser) return toast("Select a nurse name first!", "#1e293b");
-  const { date, slotName, slotId, owner } = el.dataset;
+  const { date, slotName, owner } = el.dataset;
 
   const dt = new Date(date.replace(/-/g, '/'));
   const dayOfWeek = dt.getDay();
   const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
   const otherDayStr = (dayOfWeek === 6) ? getOffsetDate(dt, 1) : getOffsetDate(dt, -1);
 
-  // REMOVE
   if (owner === currentUser) {
     if (isWeekend) {
         removeShiftByDate(date);
@@ -182,56 +178,103 @@ function handleAction(el) {
     return;
   }
 
-  // BLOCK TAKEN
   if (owner !== "") return toast(`❌ Taken by ${owner}.`);
 
-  // QUOTA 20
+  // Max 20 Check
   if (shiftsData.filter(s => s.name === currentUser).length >= 20) return toast("❌ Max 20 shifts reached.");
 
   if (isWeekend) {
-      if (checkTwoWeekLimit(date, 2) || checkTwoWeekLimit(otherDayStr, 2)) return toast("❌ Weekend exceeds 2-week limit.");
+      // VALIDATE ENTIRE WINDOW FOR BOTH DAYS
+      // We look for any 14-day window where adding these 2 shifts would result in > 7
+      if (checkProjectedTwoWeekLimit(date, otherDayStr)) {
+          return toast("❌ Error: Weekend pair exceeds 7-shift limit in a 2-week window.");
+      }
+      
       if (checkWeekendStreak(date)) return;
 
-      const hasSat = shiftsData.some(s => s.name === currentUser && s.date === (dayOfWeek === 6 ? date : otherDayStr));
-      const hasSun = shiftsData.some(s => s.name === currentUser && s.date === (dayOfWeek === 0 ? date : otherDayStr));
+      const existingOnThisDay = shiftsData.find(s => s.name === currentUser && s.date === date);
+      const otherDayPick = shiftsData.find(s => s.name === currentUser && s.date === otherDayStr);
 
-      if (hasSat || hasSun) {
-          // Switching type on existing weekend day
+      if (existingOnThisDay) {
           removeShiftByDate(date);
-          pickShiftFixed(date, slotName, slotId);
-      } else {
-          // New Weekend Pair
-          const s1 = pickShiftFixed(date, slotName, slotId);
+          pickShiftWithGravity(date, slotName);
+      } else if (!otherDayPick) {
+          const s1 = pickShiftWithGravity(date, slotName);
           if (s1) {
-              const s2 = pickShiftFixed(otherDayStr, slotName); // Auto-pick partner slot
-              if (!s2) { removeShiftByDate(date); toast("❌ Partner day is full!"); }
+              const s2 = pickShiftWithGravity(otherDayStr, slotName);
+              if (!s2) { removeShiftByDate(date); toast("❌ Partner day full!"); }
           }
+      } else {
+          pickShiftWithGravity(date, slotName);
       }
   } else {
-      if (checkTwoWeekLimit(date, 1)) return toast("❌ Exceeds 2-week limit.");
+      if (checkTwoWeekLimit(date, 1)) return toast("❌ Exceeds 7-shift limit in 2-week window.");
       removeShiftByDate(date);
-      pickShiftFixed(date, slotName, slotId);
+      pickShiftWithGravity(date, slotName);
   }
 
   saveAndRefresh();
 }
 
-function pickShiftFixed(dateStr, type, requestedSid = null) {
-    const existingOnDate = shiftsData.filter(s => s.date === dateStr);
+/**
+ * Checks if adding TWO weekend shifts would violate the 7-shift window rule
+ */
+function checkProjectedTwoWeekLimit(d1, d2) {
+    const dates = [d1, d2].sort();
+    // A 2-week window is rolling. We check all windows containing these dates.
+    // Simplest: Check 7 days before d1 to 7 days after d2.
+    const startRange = new Date(new Date(dates[0].replace(/-/g, '/')).getTime() - (7 * 86400000));
+    const endRange = new Date(new Date(dates[1].replace(/-/g, '/')).getTime() + (7 * 86400000));
     
-    // Constraints
+    const context = shiftsData.filter(s => s.name === currentUser);
+
+    // Slide a 14-day window across the range
+    for (let i = 0; i <= 14; i++) {
+        const windowStart = new Date(startRange.getTime() + (i * 86400000));
+        const windowEnd = new Date(windowStart.getTime() + (14 * 86400000));
+        
+        const existingInWindow = context.filter(s => {
+            const sd = new Date(s.date.replace(/-/g, '/'));
+            return sd >= windowStart && sd <= windowEnd && s.date !== d1 && s.date !== d2;
+        }).length;
+
+        if (existingInWindow + 2 > 7) return true;
+    }
+    return false;
+}
+
+function checkTwoWeekLimit(targetDate, adding) {
+    const target = new Date(targetDate.replace(/-/g, '/'));
+    const context = shiftsData.filter(s => s.name === currentUser);
+
+    // Check all possible 14-day windows that contain the target date
+    for (let offset = -14; offset <= 0; offset++) {
+        const windowStart = new Date(target.getTime() + (offset * 86400000));
+        const windowEnd = new Date(windowStart.getTime() + (14 * 86400000));
+
+        const count = context.filter(s => {
+            const sd = new Date(s.date.replace(/-/g, '/'));
+            return sd >= windowStart && sd <= windowEnd && s.date !== targetDate;
+        }).length;
+
+        if (count + adding > 7) return true;
+    }
+    return false;
+}
+
+function pickShiftWithGravity(dateStr, type) {
+    const existingOnDate = shiftsData.filter(s => s.date === dateStr);
     if (type !== "Night" && checkNightTurnaround(dateStr)) return false;
     if (checkTypeLimit(dateStr, type)) return false;
     if (checkGlobalLimit(dateStr)) return false;
 
-    // Find first available valid SID for this type
-    let finalSid = requestedSid;
-    if (!finalSid) {
-        const potentialSids = [0,1,2,3].map(n => `${type}-${n}`);
-        finalSid = potentialSids.find(sid => !existingOnDate.some(s => s.slotId === sid));
-    }
+    const potentialSids = [0,1,2,3].map(n => `${type}-${n}`);
+    const finalSid = potentialSids.find(sid => !existingOnDate.some(s => s.slotId === sid));
 
-    if (!finalSid) return false;
+    if (!finalSid) {
+        toast(`❌ No ${type} slots available.`);
+        return false;
+    }
 
     shiftsData.push({ date: dateStr, slotId: finalSid, slotName: type, name: currentUser });
     return true;
@@ -248,21 +291,26 @@ function saveAndRefresh() {
   updateTables();
 }
 
-// CONSTRAINTS
 function checkNightTurnaround(d) {
     const prev = getOffsetDate(new Date(d.replace(/-/g, '/')), -1);
-    return shiftsData.some(s => s.name === currentUser && s.date === prev && s.slotName === "Night");
+    const hit = shiftsData.some(s => s.name === currentUser && s.date === prev && s.slotName === "Night");
+    if (hit) toast("❌ Forbidden: Day after Night shift.");
+    return hit;
 }
 function checkGlobalLimit(d) {
     const has = (date) => shiftsData.some(s => s.name === currentUser && s.date === date);
     const dt = new Date(d.replace(/-/g, '/'));
-    return [[-1,-2,-3,-4], [-1,-2,-3,+1], [-1,-2,+1,+2], [-1,+1,+2,+3], [+1,+2,+3,+4]].some(set => set.every(o => has(getOffsetDate(dt, o))));
+    const hit = [[-1,-2,-3,-4], [-1,-2,-3,+1], [-1,-2,+1,+2], [-1,+1,+2,+3], [+1,+2,+3,+4]].some(set => set.every(o => has(getOffsetDate(dt, o))));
+    if (hit) toast("❌ Forbidden: Max 4 in a row.");
+    return hit;
 }
 function checkTypeLimit(d, t) {
     const isN = (t === "Night");
     const has = (date) => shiftsData.some(s => s.name === currentUser && s.date === date && (isN ? s.slotName === "Night" : s.slotName !== "Night"));
     const dt = new Date(d.replace(/-/g, '/'));
-    return [[-1,-2,-3], [-1,-2,+1], [-1,+1,+2], [+1,+2,+3]].some(set => set.every(o => has(getOffsetDate(dt, o))));
+    const hit = [[-1,-2,-3], [-1,-2,+1], [-1,+1,+2], [+1,+2,+3]].some(set => set.every(o => has(getOffsetDate(dt, o))));
+    if (hit) toast(`❌ Max 3 consecutive ${t}s.`);
+    return hit;
 }
 function checkWeekendStreak(d) {
     const dt = new Date(d.replace(/-/g, '/'));
@@ -271,14 +319,9 @@ function checkWeekendStreak(d) {
         const sat = getOffsetDate(new Date(START_DATE.replace(/-/g, '/')), (idx*7)+5);
         return shiftsData.some(s => s.name === currentUser && s.date === sat);
     };
-    return [[-1,-2], [-1,+1], [+1,+2]].some(set => set.every(o => hasW(weekIdx + o)));
-}
-function checkTwoWeekLimit(targetDate, adding) {
-    const target = new Date(targetDate.replace(/-/g, '/'));
-    const sWin = getOffsetDate(target, -7);
-    const eWin = getOffsetDate(target, 7);
-    const count = shiftsData.filter(s => s.name === currentUser && s.date >= sWin && s.date <= eWin && s.date !== targetDate).length;
-    return (count + adding) > 7;
+    const hit = [[-1,-2], [-1,+1], [+1,+2]].some(set => set.every(o => hasW(weekIdx + o)));
+    if (hit) toast("❌ Max 2 weekends in a row.");
+    return hit;
 }
 
 function getOffsetDate(base, offset) {
