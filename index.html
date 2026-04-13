@@ -9,13 +9,13 @@
   .header-container { display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #ddd; padding-bottom: 15px; margin-bottom: 15px; }
   .top-row { display: flex; gap: 10px; flex-wrap: wrap; }
   
-  .name-bar { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; margin-bottom:15px; }
+  .name-bar { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; margin-bottom:15px; min-height: 45px; }
   .name-btn { padding:8px 14px; border:1px solid #ccc; border-radius:20px; background:white; color: #334155; cursor:pointer; transition: 0.2s; font-weight: 500; }
-  .name-btn.active-user { background: #007bff; color: white; border-color: #0056b3; box-shadow: 0 0 0 3px rgba(0,123,255,0.3); }
-  .name-btn.completed { background: #fef08a; color: #713f12; border-color: #eab308; }
+  .name-btn.active-user { background: #007bff; color: white; border-color: #0056b3; box-shadow: 0 0 0 3px rgba(0,123,255,0.3); font-weight: 700; }
+  .name-btn.completed { border-style: double; border-width: 3px; border-color: #eab308; }
   .name-btn.register { background:#28a745; color:white; border-color:#28a745; font-weight: 700; }
   
-  .user-status-card { display:none; background:white; padding:15px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-bottom:20px; border-left: 5px solid #007bff; max-width: fit-content; }
+  .active-label { font-size: 12px; color: #007bff; font-weight: bold; margin-bottom: 5px; display: block; }
   
   .calendar-wrapper { overflow-x: auto; padding-bottom: 10px; width: 100%; }
   .calendar { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 48px 10px; min-width: 1000px; padding-top: 15px; }
@@ -52,18 +52,12 @@
     <button class="action-btn" style="color: #ef4444" onclick="resetApp()">Reset</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Clear Cache</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Single Click</strong> to pick, switch, or remove your own shifts.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;">Click a name to act as that nurse. Click again to sign off. Single click slots to pick/switch.</p>
 </div>
 
+<span class="active-label" id="statusLabel">NO ACTIVE NURSE - SELECT NAME BELOW</span>
 <div class="name-bar" id="nameBar">
   <button class="name-btn register" onclick="addStaffPrompt()">+ Add Staff Member</button>
-</div>
-
-<div class="user-status-card" id="userStatusCard">
-  <div style="display:flex; justify-content: space-between; align-items: center; gap: 20px;">
-    <span>Acting as: <strong id="currentUserName" style="color:#007bff;"></strong></span>
-    <button onclick="logout()" style="padding:2px 8px; cursor:pointer;">Switch User</button>
-  </div>
 </div>
 
 <h2 id="headerTitle">Schedule Canvas</h2>
@@ -119,9 +113,7 @@ function buildCalendar() {
       el.className = "slot";
       el.textContent = sn;
       Object.assign(el.dataset, { date: ds, slotId: `${sn}-${idx}`, slotName: sn, owner: "" });
-      
       el.onclick = () => handleAction(el);
-      
       cell.appendChild(el);
     });
     container.appendChild(cell);
@@ -129,10 +121,10 @@ function buildCalendar() {
 }
 
 function handleAction(el) {
-  if (!currentUser) return toast("Select a user name first!", "#1e293b");
+  if (!currentUser) return toast("Select a nurse name first!", "#1e293b");
   const { date, slotId, slotName, owner } = el.dataset;
 
-  // 1. UNPICK (If clicking own shift)
+  // 1. UNPICK
   if (owner === currentUser) {
     applyUI(date, slotId, slotName, currentUser, false);
     shiftsData = shiftsData.filter(s => !(s.date === date && s.slotId === slotId));
@@ -140,20 +132,18 @@ function handleAction(el) {
     return;
   }
 
-  // 2. BLOCK (If clicking someone else's shift)
+  // 2. BLOCK TAKEN
   if (owner !== "") {
     return toast(`❌ Taken by ${owner}.`, "#ef4444");
   }
 
-  // 3. AUTO-SWITCH / GRAVITY LOGIC
-  // If user already has a shift today, unpick it automatically to "switch" slots
+  // 3. AUTO-SWITCH / GRAVITY
   const existingShiftToday = shiftsData.find(s => s.name === currentUser && s.date === date);
   let tempShifts = [...shiftsData];
   if (existingShiftToday) {
     tempShifts = tempShifts.filter(s => !(s.date === date && s.name === currentUser));
   }
 
-  // Find "Gravity" slot (Top-most available same type)
   const availableSameType = Array.from(document.querySelectorAll(`.slot[data-date="${date}"][data-slot-name="${slotName}"]`))
       .find(s => s.dataset.owner === "");
   
@@ -161,7 +151,7 @@ function handleAction(el) {
   const finalId = targetEl.dataset.slotId;
   const finalSn = targetEl.dataset.slotName;
 
-  // 4. WORKFLOW CONSTRAINTS
+  // CONSTRAINTS
   if (finalSn !== "Night" && checkNightTurnaround(date, tempShifts)) {
       return toast("❌ Error: Day forbidden after Night shift.");
   }
@@ -172,7 +162,6 @@ function handleAction(el) {
       return toast("❌ Error: Max 4 shifts in a row total.");
   }
 
-  // If we had a shift today, clear its UI before placing new one
   if (existingShiftToday) {
     applyUI(existingShiftToday.date, existingShiftToday.slotId, existingShiftToday.slotName, currentUser, false);
     shiftsData = shiftsData.filter(s => !(s.date === date && s.name === currentUser));
@@ -236,24 +225,37 @@ function applyUI(ds, id, sn, name, isAdd) {
 function renderNames() {
   const b = document.getElementById("nameBar");
   const regBtn = b.querySelector('.register');
+  const label = document.getElementById("statusLabel");
+  
   b.innerHTML = ""; b.appendChild(regBtn);
+  
   staffList.sort().forEach(name => {
     const btn = document.createElement("button");
     btn.className = "name-btn" + (currentUser === name ? " active-user" : "");
     btn.textContent = name;
-    btn.onclick = () => selectUser(name);
+    btn.onclick = () => toggleUser(name);
     b.appendChild(btn);
   });
+
+  if (currentUser) {
+      label.textContent = "ACTIVE NURSE: " + currentUser.toUpperCase();
+      label.style.color = "#007bff";
+  } else {
+      label.textContent = "NO ACTIVE NURSE - SELECT NAME BELOW";
+      label.style.color = "#64748b";
+  }
 }
 
-function selectUser(name) {
-  currentUser = name;
-  document.getElementById("userStatusCard").style.display = "block";
-  document.getElementById("currentUserName").textContent = name;
+function toggleUser(name) {
+  if (currentUser === name) {
+      currentUser = null; // Sign off
+  } else {
+      currentUser = name; // Sign in / Swap
+  }
   renderNames();
   document.querySelectorAll('.slot').forEach(el => {
     el.classList.remove("mine");
-    if(el.dataset.owner === currentUser) el.classList.add("mine");
+    if(currentUser && el.dataset.owner === currentUser) el.classList.add("mine");
   });
 }
 
@@ -262,6 +264,7 @@ function addStaffPrompt() {
     if (n && !staffList.includes(n)) {
         staffList.push(n);
         localStorage.setItem('org_staff', JSON.stringify(staffList));
+        currentUser = n; // Auto-activate new user
         renderNames();
         updateTables();
     }
@@ -305,16 +308,13 @@ function exportData() {
 
 function refineData() { if(confirm("Clear all picks? Staff list will stay.")) { shiftsData = []; saveAndRefresh(); location.reload(); } }
 function resetApp() { if(confirm("Hard Reset? ALL names and picks will be deleted.")) { localStorage.clear(); location.reload(); } }
-
 function clearCache() { 
     if(confirm("Wipe all data and perform Hard Reload?")) {
         localStorage.clear();
-        // The most aggressive way to clear cache: append a random string to the URL
         window.location.href = window.location.pathname + "?v=" + Math.random();
     } 
 }
 
-function logout() { currentUser = null; location.reload(); }
 const toast = (m, bg = "#ef4444") => { const t = document.getElementById("toast"); t.style.background = bg; t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 3500); };
 
 document.addEventListener("DOMContentLoaded", init);
