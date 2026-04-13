@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit Schedule Organizer</title>
+<title>Unit Schedule Organizer v1.2.0</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 10px; background: #f0f2f5; color: #1e293b; }
+  .version-tag { position: fixed; top: 10px; right: 10px; font-size: 10px; color: #94a3b8; font-weight: bold; background: white; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0; z-index: 1000; }
   .header-container { display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #ddd; padding-bottom: 15px; margin-bottom: 15px; }
   .top-row { display: flex; gap: 10px; flex-wrap: wrap; }
   
@@ -18,10 +19,24 @@
   .active-label { font-size: 12px; color: #007bff; font-weight: bold; margin-bottom: 5px; display: block; }
   
   .calendar-wrapper { overflow-x: auto; padding-bottom: 10px; width: 100%; }
-  .calendar { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 48px 10px; min-width: 1000px; padding-top: 15px; }
-  @media (min-width: 1200px) { .calendar { grid-template-columns: repeat(14, minmax(125px, 1fr)); min-width: 1800px; } }
+  .calendar { 
+    display: grid; 
+    grid-template-columns: repeat(7, minmax(140px, 1fr)); 
+    gap: 48px 10px; 
+    min-width: 1000px; 
+    padding-top: 15px; 
+  }
+  /* Desktop Spacing: Gap after Sunday */
+  @media (min-width: 1200px) { 
+    .calendar { 
+      grid-template-columns: repeat(7, minmax(125px, 1fr)); 
+      min-width: 1100px; 
+      column-gap: 30px; /* Space between Sunday and Monday */
+    } 
+  }
   
-  .day { border: 1px solid #ddd; padding: 8px; border-radius: 8px; min-height: 200px; display: flex; flex-direction: column; background: white; }
+  .day { border: 1px solid #ddd; padding: 8px; border-radius: 8px; min-height: 200px; display: flex; flex-direction: column; background: white; position: relative; }
+  .week-label { position: absolute; top: -25px; left: 0; font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
   .date-title { font-weight:bold; font-size:14px; color: #333; margin-bottom: 4px; border-bottom:1px solid #eee; padding-bottom:4px; }
   .day.is-weekend { background: #fefce8; border-color: #fef08a; }
   
@@ -46,6 +61,8 @@
 </head>
 <body>
 
+<div class="version-tag">v1.2.0</div>
+
 <div class="header-container">
   <div class="top-row">
     <button class="action-btn btn-download" onclick="exportData()">Download</button>
@@ -53,7 +70,7 @@
     <button class="action-btn" style="color: #ef4444" onclick="resetApp()">Reset</button>
     <button class="action-btn" style="color: #64748b" onclick="clearCache()">Clear Cache</button>
   </div>
-  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Weekend Rule:</strong> Sat/Sun must be picked as a pair, but you can click a different type to switch just one day.</p>
+  <p style="font-size: 11px; color: #64748b; margin: 0;"><strong>Constraint:</strong> Max 2 weekends in a row. Sat/Sun auto-paired.</p>
 </div>
 
 <span class="active-label" id="statusLabel">NO ACTIVE NURSE - SELECT NAME BELOW</span>
@@ -103,13 +120,23 @@ function buildCalendar() {
   const container = document.getElementById("calendar");
   container.innerHTML = "";
   const start = new Date(START_DATE.replace(/-/g, '/'));
+  
   for (let i = 0; i < DAYS_COUNT; i++) {
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const dayOfWeek = dt.getDay(); 
     const ds = dt.toISOString().split('T')[0];
+    
     const cell = document.createElement("div");
     cell.className = "day" + (dayOfWeek === 0 || dayOfWeek === 6 ? " is-weekend" : "");
-    cell.innerHTML = `<div class="date-title">${dt.toDateString().slice(0, 10)}</div>`;
+    
+    // Add Week Labels to Mondays
+    if (dayOfWeek === 1) {
+        const weekNum = Math.floor(i / 7) + 1;
+        cell.innerHTML += `<div class="week-label">Week ${weekNum}</div>`;
+    }
+
+    cell.innerHTML += `<div class="date-title">${dt.toDateString().slice(0, 10)}</div>`;
+    
     SLOTS.forEach((sn, idx) => {
       const el = document.createElement("div");
       el.className = "slot";
@@ -131,7 +158,6 @@ function handleAction(el) {
   const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
   const otherWeekendDay = (dayOfWeek === 6) ? getOffsetDate(dt, 1) : getOffsetDate(dt, -1);
 
-  // 1. REMOVE LOGIC
   if (owner === currentUser) {
     if (isWeekend) {
         removeShift(date);
@@ -143,48 +169,62 @@ function handleAction(el) {
     return;
   }
 
-  // 2. BLOCK TAKEN
   if (owner !== "") return toast(`❌ Taken by ${owner}.`, "#ef4444");
 
-  // 3. WEEKEND PAIR LOGIC
   if (isWeekend) {
+      // 3 WEEKENDS IN A ROW CONSTRAINT
+      if (checkWeekendStreak(date)) {
+          return toast("❌ Error: Max 2 weekends in a row allowed.");
+      }
+
       const existingOnThisDay = shiftsData.find(s => s.name === currentUser && s.date === date);
       const otherDayPick = shiftsData.find(s => s.name === currentUser && s.date === otherWeekendDay);
 
-      // If user clicks a different type on a day they ALREADY own (Switching type)
       if (existingOnThisDay) {
           removeShift(date);
-          const success = pickShift(date, slotName);
-          if (!success) {
-               // Rollback if switch fails constraints
-               pickShift(date, existingOnThisDay.slotName);
-          }
-      } 
-      // If user owns neither day yet (New Weekend Pick)
-      else if (!otherDayPick) {
+          pickShift(date, slotName);
+      } else if (!otherDayPick) {
           const success1 = pickShift(date, slotName);
           if (success1) {
               const success2 = pickShift(otherWeekendDay, slotName); 
               if (!success2) {
                   removeShift(date);
-                  toast("❌ Partner day is full or violates rules!");
+                  toast("❌ Weekend Partner Day is full!");
               }
           }
-      }
-      // If user owns the OTHER day but not this one (Completing a pair - should be rare with auto-fill)
-      else {
+      } else {
           pickShift(date, slotName);
       }
   } else {
-      // STANDARD DAY PICK / SWITCH
       const existing = shiftsData.find(s => s.name === currentUser && s.date === date);
       if (existing) removeShift(date);
-      
-      const success = pickShift(date, slotName);
-      if (!success && existing) pickShift(date, existing.slotName); // Rollback
+      pickShift(date, slotName);
   }
 
   saveAndRefresh();
+}
+
+/**
+ * Validates that user is not picking a 3rd weekend in a sequence.
+ */
+function checkWeekendStreak(targetDate) {
+    const dt = new Date(targetDate.replace(/-/g, '/'));
+    const weekIndex = Math.floor((dt - new Date(START_DATE.replace(/-/g, '/'))) / (7 * 24 * 60 * 60 * 1000));
+    
+    const hasWeekend = (wIdx) => {
+        if (wIdx < 0 || wIdx >= 6) return false;
+        // Saturday is always index (wIdx * 7) + 5 from start date
+        const satOffset = (wIdx * 7) + 5;
+        const satDate = getOffsetDate(new Date(START_DATE.replace(/-/g, '/')), satOffset);
+        return shiftsData.some(s => s.name === currentUser && s.date === satDate);
+    };
+
+    // Check patterns: [W-2, W-1, (Current)], [W-1, (Current), W+1], [(Current), W+1, W+2]
+    if (hasWeekend(weekIndex - 1) && hasWeekend(weekIndex - 2)) return true;
+    if (hasWeekend(weekIndex - 1) && hasWeekend(weekIndex + 1)) return true;
+    if (hasWeekend(weekIndex + 1) && hasWeekend(weekIndex + 2)) return true;
+
+    return false;
 }
 
 function removeShift(dateStr) {
@@ -196,7 +236,6 @@ function removeShift(dateStr) {
 }
 
 function pickShift(dateStr, preferredType) {
-    // Determine top-most available slot for gravity filling
     const available = Array.from(document.querySelectorAll(`.slot[data-date="${dateStr}"][data-slot-name="${preferredType}"]`))
         .find(s => s.dataset.owner === "");
 
@@ -205,12 +244,9 @@ function pickShift(dateStr, preferredType) {
         return false;
     }
 
-    // Context for constraint checking (don't count the shift we're about to add)
-    const context = [...shiftsData];
-
-    if (preferredType !== "Night" && checkNightTurnaround(dateStr, context)) return false;
-    if (checkTypeLimit(dateStr, preferredType, context)) return false;
-    if (checkGlobalLimit(dateStr, context)) return false;
+    if (preferredType !== "Night" && checkNightTurnaround(dateStr, shiftsData)) return false;
+    if (checkTypeLimit(dateStr, preferredType, shiftsData)) return false;
+    if (checkGlobalLimit(dateStr, shiftsData)) return false;
 
     applyUI(dateStr, available.dataset.slotId, preferredType, currentUser, true);
     shiftsData.push({ date: dateStr, slotId: available.dataset.slotId, slotName: preferredType, name: currentUser });
@@ -222,7 +258,6 @@ function saveAndRefresh() {
   updateTables();
 }
 
-// CONSTRAINTS
 function checkNightTurnaround(dateStr, context) {
     const prevDate = getOffsetDate(new Date(dateStr.replace(/-/g, '/')), -1);
     const hit = context.some(s => s.name === currentUser && s.date === prevDate && s.slotName === "Night");
